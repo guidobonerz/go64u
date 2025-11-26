@@ -1,2 +1,2 @@
 # go64u
-Ultimate Command CLI - soon to come
+Ultimate CLI - soon to come
