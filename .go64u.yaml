@@ -1,0 +1,12 @@
+ipaddress: 10.100.200.230
+stream:
+  audio:
+    port: 10000
+  video:
+    port: 10000
+  debug:
+    port: 10000
+dump:
+  folder: .
+screenshot:
+  folder: .
