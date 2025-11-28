@@ -17,3 +17,5 @@ __debug.*
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
+
+go64u.exe
