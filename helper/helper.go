@@ -1,22 +1,30 @@
 package helper
 
-import "strconv"
+import (
+	"fmt"
+	"strconv"
+)
 
-func ParseAddressAndValue(addressStr, valueStr string) (int, int, error) {
-	address, err := getHexValue(addressStr)
-	if err != nil {
-		return 0, 0, err
-	}
-
-	value, err := getHexValue(valueStr)
-	if err != nil {
-		return 0, 0, err
-	}
-
-	return int(address), int(value), nil
+func GetWordAsString(address string) string {
+	return fmt.Sprintf("%04X", GetWord(address))
 }
 
-func getHexValue(hexValue string) (int64, error) {
-	value, _ := strconv.ParseInt(hexValue, 16, 64)
-	return value, nil
+func GetByteAsString(address string) string {
+	return fmt.Sprintf("%02X", GetByte(address))
+}
+
+func GetWord(address string) int64 {
+	value, _ := strconv.ParseInt(address, 16, 64)
+	if value < 0 && value > 0xffff {
+		panic("value MUST between 0000 and ffff")
+	}
+	return value
+}
+
+func GetByte(byte string) int64 {
+	value, _ := strconv.ParseInt(byte, 16, 64)
+	if value < 0 && value > 0xffff {
+		panic("value MUST between 0000 and ff")
+	}
+	return value
 }

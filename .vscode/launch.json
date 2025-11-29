@@ -13,7 +13,7 @@
             "mode": "auto",
             "program": "${fileDirname}",
             "args": [
-                "poke","d020","02"
+                "peek","d020"
             ]
         }
     ]
