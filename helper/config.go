@@ -11,6 +11,7 @@ var config Config
 
 type Config struct {
 	IpAddress  string `yaml:"ipaddress"`
+	Password   string `yaml:"password"`
 	Stream     Stream `yaml:"stream"`
 	Screenshot Folder `yaml:"screenshot"`
 	Dump       Folder `yaml:"dump"`
@@ -47,12 +48,12 @@ type Debug struct {
 func ReadConfig() {
 	data, err := os.ReadFile(".go64u.yaml")
 	if err != nil {
-		log.Fatalf("Fehler beim Lesen der Datei: %v", err)
+		log.Fatalf("Error reading config file: %v", err)
 	}
 
 	err = yaml.Unmarshal(data, &config)
 	if err != nil {
-		log.Fatalf("Fehler beim Parsen des YAML: %v", err)
+		log.Fatalf("Error parsing config file: %v", err)
 	}
 }
 
