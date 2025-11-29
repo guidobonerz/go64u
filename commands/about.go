@@ -7,12 +7,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func About() *cobra.Command {
+func Version() *cobra.Command {
 	return &cobra.Command{
-		Use:   "togglemenu",
-		Short: "Toggles the on-screen menu",
-		Long:  `This command does the same thing as pressing the Menu button on an 1541 Ultimate cartridge, or briefly pressing the Multi Button on the Ultimate 64. The system will either enter or exit the Ultimate menu system depending on it's current state.`,
-		Args:  cobra.ExactArgs(0),
+		Use:     "version",
+		Short:   "Version of the REST API",
+		Long:    `Returns the current version of the ReST API.`,
+		GroupID: "platform",
+		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
 			network.Execute("version", http.MethodGet, nil)
 		},

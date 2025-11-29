@@ -10,7 +10,7 @@ import (
 	"de/drazil/go64u/helper"
 )
 
-func Execute(action string, method string, data []byte) {
+func Execute(action string, method string, data []byte) []byte {
 	client := &http.Client{}
 	url := getUrl(action)
 
@@ -27,10 +27,11 @@ func Execute(action string, method string, data []byte) {
 
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
+
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Println(string(body))
+	return body
 }
 
 func getUrl(action string) string {

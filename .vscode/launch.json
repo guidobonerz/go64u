@@ -13,7 +13,7 @@
             "mode": "auto",
             "program": "${fileDirname}",
             "args": [
-                "run","assembloids.prg"
+                "peek","d020"
             ]
         }
     ]
