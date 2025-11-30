@@ -1,4 +1,4 @@
 # go64u
 
-Ultimate CLI - soon to come
+Ultimate64 CLI - soon to come
 
