@@ -105,7 +105,7 @@ func Poke() *cobra.Command {
 	}
 }
 
-func Peek() *cobra.Command {
+func PeekCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "peek [address]",
 		Short:   "Reads one byte from memory",
@@ -113,8 +113,9 @@ func Peek() *cobra.Command {
 		GroupID: "machine",
 		Args:    cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			var response []byte = network.Execute(fmt.Sprintf("machine:readmem?address=%s&length=1", helper.GetWordAsString(args[0])), http.MethodGet, nil)
-			log.Printf("peeked result:0x%02X", response[0])
+			//var response []byte = network.Execute(fmt.Sprintf("machine:readmem?address=%s&length=1", helper.GetWordAsString(args[0])), http.MethodGet, nil)
+			b := Peek(int(helper.GetWord(args[0])))
+			log.Printf("peeked result:0x%02X", b)
 		},
 	}
 }
@@ -152,4 +153,8 @@ func Message() *cobra.Command {
 			network.Execute(fmt.Sprintf("machine:writemem?address=%04x", location), http.MethodPost, buffer)
 		},
 	}
+}
+
+func Peek(address int) byte {
+	return network.Execute(fmt.Sprintf("machine:readmem?address=%04x&length=1", address), http.MethodGet, nil)[0]
 }

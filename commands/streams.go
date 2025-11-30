@@ -2,13 +2,11 @@ package commands
 
 import (
 	"de/drazil/go64u/helper"
-	"de/drazil/go64u/network"
 	"fmt"
 	"image"
 	"image/png"
 	"log"
 	"net"
-	"net/http"
 	"os"
 	"strconv"
 	"time"
@@ -83,8 +81,8 @@ func stream(name string, command string) {
 	case "debug":
 		port = helper.GetConfig().Stream.Debug.Port
 	}
-	var url = fmt.Sprintf("streams/%s:%s?ip=%s:%d", name, command, getOutboundIP().String(), port)
-	network.Execute(url, http.MethodPut, nil)
+	//var url = fmt.Sprintf("streams/%s:%s?ip=%s:%d", name, command, getOutboundIP().String(), port)
+	//network.Execute(url, http.MethodPut, nil)
 	readVideoStream(port)
 }
 

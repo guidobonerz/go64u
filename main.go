@@ -24,13 +24,13 @@ func main() {
 var rootCmd = &cobra.Command{
 	Use:   "go64u",
 	Short: "Ultimate64 Remote CLI",
-	Long:  `go64u is a tool for remote interaction with the Ultimate64 computer`,
+	Long:  "go64u is a tool for remote interaction with the Ultimate64 computer",
 }
 
 func init() {
 	rootCmd.AddCommand(commands.Version())
 	rootCmd.AddCommand(commands.Poke())
-	rootCmd.AddCommand(commands.Peek())
+	rootCmd.AddCommand(commands.PeekCommand())
 	rootCmd.AddCommand(commands.DumpPage())
 	rootCmd.AddCommand(commands.Message())
 	rootCmd.AddCommand(commands.Pause())
@@ -49,4 +49,7 @@ func init() {
 	rootCmd.AddCommand(commands.Screenshot())
 	rootCmd.AddCommand(commands.Mount())
 	rootCmd.AddCommand(commands.Unmount())
+	rootCmd.AddCommand(commands.DeviceInfo())
+	rootCmd.AddCommand(commands.ScreenControlCommand())
+
 }
