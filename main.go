@@ -32,7 +32,7 @@ func init() {
 	rootCmd.AddCommand(commands.Poke())
 	rootCmd.AddCommand(commands.Peek())
 	rootCmd.AddCommand(commands.DumpPage())
-	rootCmd.AddCommand(commands.PrintAt())
+	rootCmd.AddCommand(commands.Message())
 	rootCmd.AddCommand(commands.Pause())
 	rootCmd.AddCommand(commands.PowerOff())
 	rootCmd.AddCommand(commands.Reboot())
