@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 
 	"github.com/spf13/cobra"
 )
@@ -132,15 +133,23 @@ func DumpPage() *cobra.Command {
 	}
 }
 
-func PrintAt() *cobra.Command {
+func Message() *cobra.Command {
 	return &cobra.Command{
-		Use:     "printat [message] [x] [y]",
+		Use:     "message [message] [x] [y]",
 		Short:   "Writes a message on screen",
 		Long:    "Writes a message on screen at given position.",
 		GroupID: "machine",
 		Args:    cobra.ExactArgs(3),
 		Run: func(cmd *cobra.Command, args []string) {
-			log.Println("Not yet implemented!!")
+			y, _ := strconv.Atoi(args[2])
+			x, _ := strconv.Atoi(args[1])
+			location := 0x400 + y*40 + x
+			message := []byte(args[0])
+			buffer := make([]byte, len(message))
+			for i, v := range message {
+				buffer[i] = helper.ASCIIToScreenCodeLowercase[v]
+			}
+			network.Execute(fmt.Sprintf("machine:writemem?address=%04x", location), http.MethodPost, buffer)
 		},
 	}
 }

@@ -2,17 +2,22 @@ package commands
 
 import (
 	"de/drazil/go64u/helper"
+	"de/drazil/go64u/network"
 	"fmt"
 	"image"
 	"image/png"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"strconv"
 	"time"
 
+	"github.com/nfnt/resize"
 	"github.com/spf13/cobra"
 )
+
+var scaleFactor = 100
 
 func VideoStream() *cobra.Command {
 	return &cobra.Command{
@@ -54,26 +59,36 @@ func DebugStream() *cobra.Command {
 }
 
 func Screenshot() *cobra.Command {
-	return &cobra.Command{
+	var cmd = &cobra.Command{
 		Use:     "screenshot [format]",
 		Short:   "Makes a screen of the current screen",
 		Long:    "Makes a screen of the current screen",
 		GroupID: "stream",
 		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
-			readStream(11000)
+			stream("video", "start")
 		},
 	}
+	cmd.Flags().IntVarP(&scaleFactor, "scale", "s", 100, "scale factor in percent(%)")
+	return cmd
 }
 
 func stream(name string, command string) {
-	//var url = fmt.Sprintf("streams/%s:%s?ip=%s:%s", name, command, getOutboundIP().String(), "11000")
-	//network.Execute(url, http.MethodPut, nil)
-	//channel := make(chan int)
-	readStream(11000)
+	port := 11000
+	switch name {
+	case "video":
+		port = helper.GetConfig().Stream.Video.Port
+	case "audio":
+		port = helper.GetConfig().Stream.Audio.Port
+	case "debug":
+		port = helper.GetConfig().Stream.Debug.Port
+	}
+	var url = fmt.Sprintf("streams/%s:%s?ip=%s:%d", name, command, getOutboundIP().String(), port)
+	network.Execute(url, http.MethodPut, nil)
+	readVideoStream(port)
 }
 
-func readStream(port int) {
+func readVideoStream(port int) {
 	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		fmt.Println("Error resolving address:", err)
@@ -87,7 +102,7 @@ func readStream(port int) {
 	}
 	defer socket.Close()
 
-	dataBuffer := make([]byte, 780) // adjust size as needed
+	dataBuffer := make([]byte, 780)
 	running := true
 	count := 0
 	offset := 0
@@ -104,7 +119,7 @@ func readStream(port int) {
 			capture = true
 			if count == 68 {
 				capture = false
-				if writeImage(imageData) {
+				if writeImage(imageData, scaleFactor) {
 					running = false
 				}
 				count = 0
@@ -118,10 +133,9 @@ func readStream(port int) {
 	}
 }
 
-func writeImage(data []byte) bool {
+func writeImage(data []byte, scaleFactor int) bool {
 	img := image.NewPaletted(image.Rect(0, 0, 384, 272), helper.GetPalette())
 	pixelIndex := 0
-
 	for _, b := range data {
 
 		img.Pix[pixelIndex] = b & 0x0F
@@ -139,7 +153,10 @@ func writeImage(data []byte) bool {
 	}
 	defer file.Close()
 
-	png.Encode(file, img)
+	scaledWidth := float32(384) / float32(100) * float32(scaleFactor)
+	fmt.Printf("scale:%f", scaledWidth)
+	scaledImage := resize.Resize(uint(scaledWidth), 0, img, resize.Bicubic)
+	png.Encode(file, scaledImage)
 	log.Println("Screenshot sucessfully written")
 	return true
 }
