@@ -47,4 +47,6 @@ func init() {
 	rootCmd.AddCommand(commands.AudioStream())
 	rootCmd.AddCommand(commands.DebugStream())
 	rootCmd.AddCommand(commands.Screenshot())
+	rootCmd.AddCommand(commands.Mount())
+	rootCmd.AddCommand(commands.Unmount())
 }

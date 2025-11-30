@@ -9,7 +9,7 @@ import (
 func Files() *cobra.Command {
 	return &cobra.Command{
 		Use:     "ls [path]",
-		Short:   "Resets the U64",
+		Short:   "List files of the internal file storage like USB Stick etc.",
 		Long:    "This command returns basic information about a file, like size and extension.",
 		GroupID: "file",
 		Args:    cobra.ExactArgs(1),
