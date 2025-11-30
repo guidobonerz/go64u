@@ -13,7 +13,7 @@ import (
 func Execute(action string, method string, data []byte) []byte {
 	client := &http.Client{}
 	url := getUrl(action)
-
+	log.Println(url)
 	req, err := http.NewRequest(method, url, bytes.NewBuffer(data))
 	//req.Header.Set("Content-Type", "application/json")
 	if err != nil {

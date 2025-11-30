@@ -13,7 +13,7 @@
             "mode": "auto",
             "program": "${fileDirname}",
             "args": [
-                "peek","d020"
+                "video","start"
             ]
         }
     ]
