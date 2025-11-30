@@ -61,8 +61,8 @@ func DebugStream() *cobra.Command {
 func Screenshot() *cobra.Command {
 	var cmd = &cobra.Command{
 		Use:     "screenshot [format]",
-		Short:   "Makes a screen of the current screen",
-		Long:    "Makes a screen of the current screen",
+		Short:   "Makes a screenshot of the current screen",
+		Long:    "Makes a screenshot of the current screen",
 		GroupID: "stream",
 		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
