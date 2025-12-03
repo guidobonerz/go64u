@@ -1,10 +1,25 @@
 package commands
 
 import (
-	"log"
+	"fmt"
 
 	"github.com/spf13/cobra"
 )
+
+const SCREEN_HEIGHT = 0x08
+const SCREEN_WIDTH = 0x08
+const SCREEN_ENABLED = 0x10
+const MULTICOLOR = 0x10
+const SCREEN_MODE = 0x20
+const EXTENDED_BACKGROUND = 0x40
+
+var height = [...]string{"24", "25"}
+var width = [...]string{"38", "40"}
+var onoff = [...]string{"off", "on"}
+var screenmode = [...]string{"text", "bitmap"}
+var shift = [...]int{1, 3}
+var mask = [...]int{7, 1}
+var offset = [...]int{0x800, 0x2000}
 
 func ScreenControlCommand() *cobra.Command {
 	return &cobra.Command{
@@ -15,51 +30,28 @@ func ScreenControlCommand() *cobra.Command {
 		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
 			d11 := Peek(0xd011) & 0xff
-			log.Printf("d011 mask:%08b\n", d11)
-			if d11&8 == 8 {
-				log.Printf("Screen height: 25")
-			} else {
-				log.Printf("Screen height: 24")
-			}
-			if d11&16 == 16 {
-				log.Printf("Screen: On")
-			} else {
-				log.Printf("Screen: Off")
-			}
-
-			if d11&32 == 32 {
-				log.Printf("Screenmode: Bitmap")
-			} else {
-				log.Printf("Screenmode: Text")
-			}
-			if d11&64 == 64 {
-				log.Printf("ExtendedBackground: On")
-			} else {
-				log.Printf("ExtendedBackground: Off")
-			}
-			log.Printf("peeked result:0x%02X", d11)
-
 			d16 := Peek(0xd016) & 0xff
-			log.Printf("d016 mask:%08b\n", d16)
-			if d16&8 == 8 {
-				log.Printf("Columns: 40")
-			} else {
-				log.Printf("Columns: 38")
-			}
-			if d16&16 == 16 {
-				log.Printf("Multicolor: On")
-			} else {
-				log.Printf("Multicolor: Off")
-			}
-			vicbank := int(Peek(0xdd00)) & 3
-			log.Printf("dd00 mask:%08b\n", vicbank)
-			log.Printf("VIC Bank: %02x", vicbank)
-			d18 := int(Peek(0xd018))
-			log.Printf("d018 mask:%08b\n", d18)
-			charmemindex := (d18 >> 1) & 7
-			log.Printf("CharMem: %04x:%04x", (3-vicbank)*0x4000+charmemindex*0x800, (3-vicbank)*0x4000+charmemindex*0x800+0x7ff)
+			d18 := int(Peek(0xd018) & 0xff)
+			vicbank := int(Peek(0xdd00)&0xff) & 3
+			screenModeFlag := (d11 >> 5) & 1
+			fmt.Printf("d011 bitmask:%08b/%02x\n", d11, d11)
+			fmt.Printf("d016 bitmask:%08b/%02x\n", d16, d16)
+			fmt.Printf("d018 bitmask:%08b/%02x\n", d18, d18)
+			fmt.Printf("dd00 bitmask:%08b/%02x\n", vicbank, vicbank)
+
+			fmt.Printf("Screen: %s\n", onoff[(d11>>4)&1])
+			fmt.Printf("Screen height: %s\n", height[(d11>>3)&1])
+			fmt.Printf("Screen width: %s\n", width[(d11>>3)&1])
+			fmt.Printf("Screenmode: %s\n", screenmode[screenModeFlag])
+			fmt.Printf("ExtendedBackground: %s\n", onoff[(d11>>6)&1])
+			fmt.Printf("Multicolor: %s\n", onoff[(d16>>4)&1])
+
+			gfxMemIndex := (d18 >> shift[screenModeFlag]) & mask[screenModeFlag]
+			charMemFrom := (3-vicbank)*0x4000 + gfxMemIndex*offset[screenModeFlag]
+			fmt.Printf("CharMem: %04x:%04x\n", charMemFrom, charMemFrom+offset[screenModeFlag]-1)
 			screenmemindex := (d18 >> 4) & 15
-			log.Printf("ScreenMem: %04x:%04x", (3-vicbank)*0x4000+screenmemindex*0x400, (3-vicbank)*0x4000+screenmemindex*0x400+0x3ff)
+			screenMemFrom := (3-vicbank)*0x4000 + screenmemindex*0x400
+			fmt.Printf("ScreenMem: %04x:%04x\n", screenMemFrom, screenMemFrom+0x3ff)
 		},
 	}
 }
