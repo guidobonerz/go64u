@@ -3,12 +3,25 @@ package commands
 import (
 	"de/drazil/go64u/network"
 	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
-func Version() *cobra.Command {
+type DeviceInfo struct {
+	Product         string `yaml:"product"`
+	FirmwareVersion string `yaml:"firmware_version"`
+	FPGAVersion     string `yaml:"fpga_version"`
+	CoreVersion     string `yaml:"core_version"`
+	Hostname        string `yaml:"hostname"`
+	UniqueID        string `yaml:"unique_id"`
+}
+
+var deviceInfo DeviceInfo
+
+func VersionCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "version",
 		Short:   "Version of the REST API",
@@ -20,7 +33,7 @@ func Version() *cobra.Command {
 		},
 	}
 }
-func DeviceInfo() *cobra.Command {
+func DeviceInfoCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "info",
 		Short:   "Show Device Info",
@@ -29,7 +42,17 @@ func DeviceInfo() *cobra.Command {
 		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
 			info := network.Execute("info", http.MethodGet, nil)
-			fmt.Println(string(info))
+			err := yaml.Unmarshal(info, &deviceInfo)
+			if err != nil {
+				log.Fatalf("Error parsing config file: %v", err)
+			}
+			fmt.Print("\n** Device Information **\n\n")
+			fmt.Printf("Product         : %s\n", deviceInfo.Product)
+			fmt.Printf("Firmware Version: %s\n", deviceInfo.FirmwareVersion)
+			fmt.Printf("FPGA Version    : %s\n", deviceInfo.FPGAVersion)
+			fmt.Printf("Core Version    : %s\n", deviceInfo.CoreVersion)
+			fmt.Printf("Hostname        : %s\n", deviceInfo.Hostname)
+			fmt.Printf("Unique ID       : %s\n", deviceInfo.UniqueID)
 		},
 	}
 }

@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func Files() *cobra.Command {
+func FilesCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "ls [path]",
 		Short:   "List files of the internal file storage like USB Stick etc.",

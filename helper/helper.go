@@ -3,6 +3,8 @@ package helper
 import (
 	"fmt"
 	"image/color"
+	"log"
+	"os"
 	"strconv"
 )
 
@@ -196,4 +198,12 @@ func GetPalette() color.Palette {
 		color.RGBA{0x70, 0x7c, 0xe6, 255}, // E: Light Blue
 		color.RGBA{0xb6, 0xb6, 0xb6, 255}, // F: Light Grey
 	}
+}
+
+func ReadFile(fileName string) ([]byte, error) {
+	bytes, err := os.ReadFile(fileName)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return bytes, err
 }
