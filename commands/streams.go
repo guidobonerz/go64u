@@ -17,7 +17,7 @@ import (
 
 var scaleFactor = 100
 
-func VideoStream() *cobra.Command {
+func VideoStreamCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "video [command]",
 		Short:   "Starts/Stops the video stream",
@@ -30,7 +30,7 @@ func VideoStream() *cobra.Command {
 	}
 }
 
-func AudioStream() *cobra.Command {
+func AudioStreamCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "audio [command]",
 		Short:   "Starts/Stops the audio stream",
@@ -43,7 +43,7 @@ func AudioStream() *cobra.Command {
 	}
 }
 
-func DebugStream() *cobra.Command {
+func DebugStreamCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "debug [command]",
 		Short:   "Starts/Stops the debug stream",
@@ -56,7 +56,7 @@ func DebugStream() *cobra.Command {
 	}
 }
 
-func Screenshot() *cobra.Command {
+func ScreenshotCommand() *cobra.Command {
 	var cmd = &cobra.Command{
 		Use:     "screenshot [format]",
 		Short:   "Makes a screenshot of the current screen",

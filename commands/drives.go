@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"de/drazil/go64u/helper"
 	"de/drazil/go64u/network"
 	"fmt"
 	"net/http"
@@ -9,7 +10,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func Mount() *cobra.Command {
+func MountCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "mount [drive] [file]",
 		Short:   "Mounts a diskimage [d64/g64/d71/g71/d81] on a given drive",
@@ -20,13 +21,13 @@ func Mount() *cobra.Command {
 			if !isValidDrive(args[0]) {
 				panic("not a valid drive name, A or B required")
 			}
-			payload, _ := readFile(args[1])
+			payload, _ := helper.ReadFile(args[1])
 			network.Execute(fmt.Sprintf("drives/%s:mount?type=d64&mode=readwrite", args[0]), http.MethodPost, payload)
 		},
 	}
 }
 
-func Unmount() *cobra.Command {
+func UnmountCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "unmount [drive]",
 		Short:   "Unmounts a diskimage from a given drive",

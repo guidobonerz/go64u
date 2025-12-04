@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func Reset() *cobra.Command {
+func ResetCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "reset",
 		Short:   "Resets the U64",
@@ -24,7 +24,7 @@ func Reset() *cobra.Command {
 	}
 }
 
-func Reboot() *cobra.Command {
+func RebootCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "reboot",
 		Short:   "Reboots the U64",
@@ -37,7 +37,7 @@ func Reboot() *cobra.Command {
 	}
 }
 
-func Pause() *cobra.Command {
+func PauseCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "pause",
 		Short:   "Pauses the U64",
@@ -50,7 +50,7 @@ func Pause() *cobra.Command {
 	}
 }
 
-func Resume() *cobra.Command {
+func ResumeCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "resume",
 		Short:   "Resume the U64 after pause",
@@ -63,7 +63,7 @@ func Resume() *cobra.Command {
 	}
 }
 
-func PowerOff() *cobra.Command {
+func PowerOffCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "poweroff",
 		Short:   "Shuts down the U64",
@@ -76,7 +76,7 @@ func PowerOff() *cobra.Command {
 	}
 }
 
-func ToggleMenu() *cobra.Command {
+func ToggleMenuCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "togglemenu",
 		Short:   "Toggles the on-screen menu",
@@ -89,7 +89,7 @@ func ToggleMenu() *cobra.Command {
 	}
 }
 
-func Poke() *cobra.Command {
+func PokeCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "poke [address] [value]",
 		Short:   "Sets one byte in memory",
@@ -120,7 +120,7 @@ func PeekCommand() *cobra.Command {
 	}
 }
 
-func DumpPage() *cobra.Command {
+func DumpPageCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "page [number] [file]",
 		Short:   "dump a page to file",
@@ -134,7 +134,7 @@ func DumpPage() *cobra.Command {
 	}
 }
 
-func Message() *cobra.Command {
+func MessageCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "message [message] [x] [y]",
 		Short:   "Writes a message on screen",
