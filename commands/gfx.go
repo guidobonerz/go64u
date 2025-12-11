@@ -29,10 +29,10 @@ func ScreenControlCommand() *cobra.Command {
 		GroupID: "platform",
 		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
-			d11 := Peek(0xd011) & 0xff
-			d16 := Peek(0xd016) & 0xff
-			d18 := int(Peek(0xd018) & 0xff)
-			vicbank := int(Peek(0xdd00)&0xff) & 3
+			d11 := ReadFromMemory(0xd011, 1) & 0xff
+			d16 := ReadFromMemory(0xd016, 1) & 0xff
+			d18 := int(ReadFromMemory(0xd018, 1) & 0xff)
+			vicbank := int(ReadFromMemory(0xdd00, 1)&0xff) & 3
 			screenModeFlag := (d11 >> 5) & 1
 			fmt.Print("\n** Screen Mode and Memory Information **\n\n")
 			fmt.Printf("d011 bitmask:%08b/%02x\n", d11, d11)
@@ -56,7 +56,7 @@ func ScreenControlCommand() *cobra.Command {
 			fmt.Printf("Spritepointer     : %04x:%04x\n", screenMemFrom+0x3f8, screenMemFrom+0x3ff)
 			s := 0
 			for i := 0x3f8; i < 0x400; i++ {
-				sp := int((Peek(screenMemFrom+i) & 0xff) * 0x40)
+				sp := int((ReadFromMemory(screenMemFrom+i, 1) & 0xff) * 0x40)
 				fmt.Printf("Sprite %d          : %04x\n", s, screenMemFrom+sp)
 				s++
 			}
