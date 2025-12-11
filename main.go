@@ -29,8 +29,8 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(commands.VersionCommand())
-	rootCmd.AddCommand(commands.PokeCommand())
-	rootCmd.AddCommand(commands.PeekCommand())
+	rootCmd.AddCommand(commands.WriteMemoryCommand())
+	rootCmd.AddCommand(commands.ReadMemoryCommand())
 	rootCmd.AddCommand(commands.DumpPageCommand())
 	rootCmd.AddCommand(commands.MessageCommand())
 	rootCmd.AddCommand(commands.PauseCommand())
@@ -51,5 +51,7 @@ func init() {
 	rootCmd.AddCommand(commands.UnmountCommand())
 	rootCmd.AddCommand(commands.DeviceInfoCommand())
 	rootCmd.AddCommand(commands.ScreenControlCommand())
+	rootCmd.AddCommand(commands.FtpLsCommand())
+	rootCmd.AddCommand(commands.FtpCdCommand())
 
 }

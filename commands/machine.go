@@ -11,6 +11,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var peekLength uint16
+var output string
+var outputtype string
+
 func ResetCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "reset",
@@ -89,9 +93,9 @@ func ToggleMenuCommand() *cobra.Command {
 	}
 }
 
-func PokeCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:     "poke [address] [value]",
+func WriteMemoryCommand() *cobra.Command {
+	var cmd = &cobra.Command{
+		Use:     "writemem [address] [value]",
 		Short:   "Sets one byte in memory",
 		Long:    "POKE writes a byte value (00-ff) in a memory address (0-ffff).",
 		GroupID: "machine",
@@ -103,21 +107,27 @@ func PokeCommand() *cobra.Command {
 			network.Execute(fmt.Sprintf("machine:writemem?address=%s", helper.GetWordAsString(args[0])), http.MethodPost, []byte{byte(helper.GetByte(args[1]))})
 		},
 	}
+	//cmd.Flags().Uint16VarP(&peekLength, "length", "l", 1, "set the length of data to peek, defaults to 1")
+	return cmd
 }
 
-func PeekCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:     "peek [address]",
-		Short:   "Reads one byte from memory",
-		Long:    "Peek reads one byte from memory",
+func ReadMemoryCommand() *cobra.Command {
+	var cmd = &cobra.Command{
+		Use:     "readmem [address] [length] --type [file, data,] --output",
+		Short:   "Reads serveral bytes fro memory by a given length",
+		Long:    "Reads serveral bytes fro memory by a given length",
 		GroupID: "machine",
 		Args:    cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			//var response []byte = network.Execute(fmt.Sprintf("machine:readmem?address=%s&length=1", helper.GetWordAsString(args[0])), http.MethodGet, nil)
-			b := Peek(int(helper.GetWord(args[0])))
+			b := ReadFromMemory(int(helper.GetWord(args[0])), peekLength)
 			log.Printf("peeked result:0x%02X", b)
 		},
 	}
+	cmd.Flags().Uint16VarP(&peekLength, "length", "l", 1, "set the length of data to peek, defaults to 1")
+	cmd.Flags().StringVarP(&output, "output", "o", "output.bin", "set the output file name")
+	cmd.Flags().StringVarP(&outputtype, "type", "t", "file", "set the output type [file, bin]")
+	return cmd
 }
 
 func DumpPageCommand() *cobra.Command {
@@ -155,6 +165,6 @@ func MessageCommand() *cobra.Command {
 	}
 }
 
-func Peek(address int) byte {
-	return network.Execute(fmt.Sprintf("machine:readmem?address=%04x&length=1", address), http.MethodGet, nil)[0]
+func ReadFromMemory(address int, length uint16) byte {
+	return network.Execute(fmt.Sprintf("machine:readmem?address=%04x&length=%d", address, length), http.MethodGet, nil)[0]
 }

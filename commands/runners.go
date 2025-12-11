@@ -16,7 +16,7 @@ func LoadCommand() *cobra.Command {
 		GroupID: "runner",
 		Args:    cobra.MaximumNArgs(2),
 		Run: func(cmd *cobra.Command, args []string) {
-			cmd.Flags().BoolP("detectstart", "d", false, "detect start address if address is not given")
+
 			data, _ := helper.ReadFile(args[0])
 			network.Execute("runners:load_prg", http.MethodPost, data)
 		},
