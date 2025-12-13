@@ -2,12 +2,11 @@ package network
 
 import (
 	"bytes"
+	"de/drazil/go64u/config"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
-
-	"de/drazil/go64u/helper"
 )
 
 func Execute(action string, method string, data []byte) []byte {
@@ -35,5 +34,5 @@ func Execute(action string, method string, data []byte) []byte {
 }
 
 func getUrl(action string) string {
-	return fmt.Sprintf("http://%s/v1/%s", helper.GetConfig().IpAddress, action)
+	return fmt.Sprintf("http://%s/v1/%s", config.GetConfig().IpAddress, action)
 }

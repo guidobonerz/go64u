@@ -1,8 +1,8 @@
 package commands
 
 import (
-	"de/drazil/go64u/helper"
 	"de/drazil/go64u/network"
+	"de/drazil/go64u/util"
 	"net/http"
 
 	"github.com/spf13/cobra"
@@ -17,7 +17,7 @@ func LoadCommand() *cobra.Command {
 		Args:    cobra.MaximumNArgs(2),
 		Run: func(cmd *cobra.Command, args []string) {
 
-			data, _ := helper.ReadFile(args[0])
+			data, _ := util.ReadFile(args[0])
 			network.Execute("runners:load_prg", http.MethodPost, data)
 		},
 	}
@@ -34,7 +34,7 @@ func RunCommand() *cobra.Command {
 		Args:    cobra.MaximumNArgs(2),
 		Run: func(cmd *cobra.Command, args []string) {
 
-			data, _ := helper.ReadFile(args[0])
+			data, _ := util.ReadFile(args[0])
 			network.Execute("runners:run_prg", http.MethodPost, data)
 		},
 	}
@@ -51,7 +51,7 @@ func CrtCommand() *cobra.Command {
 		Args:    cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 
-			data, _ := helper.ReadFile(args[0])
+			data, _ := util.ReadFile(args[0])
 			network.Execute("runners:run_crt", http.MethodPost, data)
 		},
 	}

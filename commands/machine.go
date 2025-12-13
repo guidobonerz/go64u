@@ -1,8 +1,8 @@
 package commands
 
 import (
-	"de/drazil/go64u/helper"
 	"de/drazil/go64u/network"
+	"de/drazil/go64u/util"
 	"fmt"
 	"log"
 	"net/http"
@@ -104,7 +104,7 @@ func WriteMemoryCommand() *cobra.Command {
 			if len(args[1]) > 2 {
 				panic("only one byte allowed")
 			}
-			network.Execute(fmt.Sprintf("machine:writemem?address=%s", helper.GetWordAsString(args[0])), http.MethodPost, []byte{byte(helper.GetByte(args[1]))})
+			network.Execute(fmt.Sprintf("machine:writemem?address=%s", util.GetWordAsString(args[0])), http.MethodPost, []byte{byte(util.GetByte(args[1]))})
 		},
 	}
 	//cmd.Flags().Uint16VarP(&peekLength, "length", "l", 1, "set the length of data to peek, defaults to 1")
@@ -120,7 +120,7 @@ func ReadMemoryCommand() *cobra.Command {
 		Args:    cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			//var response []byte = network.Execute(fmt.Sprintf("machine:readmem?address=%s&length=1", helper.GetWordAsString(args[0])), http.MethodGet, nil)
-			b := ReadFromMemory(int(helper.GetWord(args[0])), peekLength)
+			b := ReadFromMemory(int(util.GetWord(args[0])), peekLength)
 			log.Printf("peeked result:0x%02X", b)
 		},
 	}
@@ -158,7 +158,7 @@ func MessageCommand() *cobra.Command {
 			message := []byte(args[0])
 			buffer := make([]byte, len(message))
 			for i, v := range message {
-				buffer[i] = helper.ASCIIToScreenCodeLowercase[v]
+				buffer[i] = util.ASCIIToScreenCodeLowercase[v]
 			}
 			network.Execute(fmt.Sprintf("machine:writemem?address=%04x", location), http.MethodPost, buffer)
 		},
