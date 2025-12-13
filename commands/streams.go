@@ -1,7 +1,8 @@
 package commands
 
 import (
-	"de/drazil/go64u/helper"
+	"de/drazil/go64u/config"
+	"de/drazil/go64u/util"
 	"fmt"
 	"image"
 	"image/png"
@@ -75,11 +76,11 @@ func stream(name string, command string) {
 	port := 11000
 	switch name {
 	case "video":
-		port = helper.GetConfig().Stream.Video.Port
+		port = config.GetConfig().Stream.Video.Port
 	case "audio":
-		port = helper.GetConfig().Stream.Audio.Port
+		port = config.GetConfig().Stream.Audio.Port
 	case "debug":
-		port = helper.GetConfig().Stream.Debug.Port
+		port = config.GetConfig().Stream.Debug.Port
 	}
 	//var url = fmt.Sprintf("streams/%s:%s?ip=%s:%d", name, command, getOutboundIP().String(), port)
 	//network.Execute(url, http.MethodPut, nil)
@@ -112,7 +113,7 @@ func readVideoStream(port int) {
 			fmt.Println("Error receiving:", err)
 			continue
 		}
-		var linenumber = helper.GetWordFromArray(4, dataBuffer)
+		var linenumber = util.GetWordFromArray(4, dataBuffer)
 		if linenumber&0x8000 == 0x8000 {
 			capture = true
 			if count == 68 {
@@ -132,7 +133,7 @@ func readVideoStream(port int) {
 }
 
 func writeImage(data []byte, scaleFactor int) bool {
-	img := image.NewPaletted(image.Rect(0, 0, 384, 272), helper.GetPalette())
+	img := image.NewPaletted(image.Rect(0, 0, 384, 272), util.GetPalette())
 	pixelIndex := 0
 	for _, b := range data {
 

@@ -1,14 +1,18 @@
 package commands
 
 import (
-	"de/drazil/go64u/helper"
+	"de/drazil/go64u/network"
+	"de/drazil/go64u/util"
 	"fmt"
 	"log"
-	"time"
+	"strings"
 
+	"github.com/dustin/go-humanize"
 	"github.com/jlaffaye/ftp"
 	"github.com/spf13/cobra"
 )
+
+var CurrentPath string = ""
 
 func FilesCommand() *cobra.Command {
 	return &cobra.Command{
@@ -26,55 +30,59 @@ func FilesCommand() *cobra.Command {
 		},
 	}
 }
-func FtpLsCommand() *cobra.Command {
+func RemoteLsCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:     "fls [path]",
-		Short:   "List files of the internal file storage like USB Stick etc.",
-		Long:    "This command returns basic information about a file, like size and extension.",
+		Use:     "ls [path/diskimage] [filter]",
+		Short:   "List files of the internal file storage like USB Stick etc. via ftp",
+		Long:    "List files of the internal file storage like USB Stick etc. via ftp",
 		GroupID: "file",
-		Args:    cobra.ExactArgs(1),
+		Args:    cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			c, err := ftp.Dial(fmt.Sprintf("%s:21", helper.GetConfig().IpAddress), ftp.DialWithTimeout(5*time.Second))
-			if err != nil {
-				log.Fatal(err)
+			var c = network.GetFtpConnection()
+			path := ""
+			if len(args) > 0 {
+				path = args[0]
 			}
-			err = c.Login("anonymous", "anonymous")
-			if err != nil {
-				log.Fatal(err)
-			}
-			entries, err := c.List(args[0])
+
+			entries, err := c.List(path)
 			if err != nil {
 				log.Fatal(err)
 			}
 			for _, entry := range entries {
-				if entry.Type == ftp.EntryTypeFolder {
-					fmt.Printf("<dir> %s\n", entry.Name)
-				} else {
-					fmt.Printf("%s\n", entry.Name)
-				}
 
+				if entry.Type == ftp.EntryTypeFolder {
+					fmt.Printf("%s\U0001F4C1 %s%-24s\n", util.Yellow, util.Green, entry.Name)
+				} else {
+					if strings.HasSuffix(entry.Name, "d64") {
+						fmt.Printf("\U0001F4BE %s%-30s - %s%s\n", util.Blue, entry.Name, util.Gray, humanize.Bytes(245234525))
+					} else {
+						fmt.Printf("\U0001F4C4 %s%-30s - %s%s\n", util.Blue, entry.Name, util.Gray, humanize.Bytes(entry.Size))
+					}
+				}
 			}
 		},
 	}
 }
-func FtpCdCommand() *cobra.Command {
+
+func RemoteCdCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:     "fcd [path]",
-		Short:   "List files of the internal file storage like USB Stick etc.",
-		Long:    "This command returns basic information about a file, like size and extension.",
+		Use:     "cd [path]",
+		Short:   "changes the folder on the ultimate64 via ftp",
+		Long:    "changes the folder on the ultimate64 via ftp",
 		GroupID: "file",
-		Args:    cobra.ExactArgs(1),
+		Args:    cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			c, err := ftp.Dial(fmt.Sprintf("%s:21", helper.GetConfig().IpAddress), ftp.DialWithTimeout(5*time.Second))
-			if err != nil {
-				log.Fatal(err)
-			}
-			err = c.Login("anonymous", "anonymous")
-			if err != nil {
-				log.Fatal(err)
+			var c = network.GetFtpConnection()
+			path := ""
+			if len(args) > 0 {
+				path = args[0]
 			}
 
-			err = c.ChangeDir(args[0])
+			err := c.ChangeDir(path)
+			if err != nil {
+				log.Fatal(err)
+			}
+			CurrentPath, err = c.CurrentDir()
 			if err != nil {
 				log.Fatal(err)
 			}

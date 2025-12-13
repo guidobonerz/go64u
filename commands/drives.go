@@ -1,8 +1,8 @@
 package commands
 
 import (
-	"de/drazil/go64u/helper"
 	"de/drazil/go64u/network"
+	"de/drazil/go64u/util"
 	"fmt"
 	"net/http"
 	"strings"
@@ -21,7 +21,7 @@ func MountCommand() *cobra.Command {
 			if !isValidDrive(args[0]) {
 				panic("not a valid drive name, A or B required")
 			}
-			payload, _ := helper.ReadFile(args[1])
+			payload, _ := util.ReadFile(args[1])
 			network.Execute(fmt.Sprintf("drives/%s:mount?type=d64&mode=readwrite", args[0]), http.MethodPost, payload)
 		},
 	}
