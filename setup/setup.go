@@ -25,7 +25,6 @@ func Setup(cmd *cobra.Command, skipTerminal bool) {
 	cmd.AddCommand(commands.ResetCommand())
 	cmd.AddCommand(commands.ResumeCommand())
 	cmd.AddCommand(commands.ToggleMenuCommand())
-	cmd.AddCommand(commands.FilesCommand())
 	cmd.AddCommand(commands.LoadCommand())
 	cmd.AddCommand(commands.RunCommand())
 	cmd.AddCommand(commands.CrtCommand())
@@ -38,5 +37,6 @@ func Setup(cmd *cobra.Command, skipTerminal bool) {
 	cmd.AddCommand(commands.DeviceInfoCommand())
 	cmd.AddCommand(commands.ScreenControlCommand())
 	cmd.AddCommand(commands.RemoteLsCommand())
+	cmd.AddCommand(commands.RemoteCdCommand())
 
 }
