@@ -15,6 +15,7 @@ import (
 )
 
 var CurrentPath string = ""
+var lastPath string = ""
 
 var extensionIcon = map[string]string{
 
@@ -27,6 +28,9 @@ var extensionIcon = map[string]string{
 	"tap":     "\U0001F4FC",
 	"default": "\U0001F4C4"}
 var re = regexp.MustCompile(`\.(\w+)$`)
+var insideDiskimage bool
+var entry *ftp.Entry
+var mountedDiskImage []byte
 
 func RemoteLsCommand() *cobra.Command {
 	return &cobra.Command{
@@ -51,7 +55,7 @@ func RemoteLsCommand() *cobra.Command {
 					fmt.Printf("%s %s%s\n", extensionIcon["dir"], util.Green, entry.Name)
 				} else {
 
-					suffix := re.FindStringSubmatch(strings.ToLower(entry.Name))[1]
+					suffix := getSuffix(entry)
 					var start = "----"
 					var err error
 					var r *ftp.Response
@@ -72,7 +76,8 @@ func RemoteLsCommand() *cobra.Command {
 					if icon == "" {
 						icon = extensionIcon["default"]
 					}
-					fmt.Printf("%s %s%-6s|%s|%s%s\n", icon, util.Gray, humanize.Bytes(entry.Size), start, util.Blue, entry.Name)
+					valueParts := strings.Fields(humanize.Bytes(entry.Size))
+					fmt.Printf("%s %s%-6s|%s|%s%s\n", icon, util.Gray, fmt.Sprintf("%6s %-3s", valueParts[0], valueParts[1]), start, util.Blue, entry.Name)
 				}
 			}
 
@@ -94,14 +99,37 @@ func RemoteCdCommand() *cobra.Command {
 				path = args[0]
 			}
 
-			err := c.ChangeDir(path)
-			if err != nil {
-				log.Fatal(err)
+			var err error
+
+			entry, err = c.GetEntry(path)
+			if entry.Type == ftp.EntryTypeFile && !insideDiskimage && getSuffix(entry) == "d64" {
+				insideDiskimage = true
+				lastPath = CurrentPath
+				CurrentPath = fmt.Sprintf("%s/%s", CurrentPath, entry.Name)
+				var r *ftp.Response
+				r, err = c.Retr(CurrentPath)
+				mountedDiskImage = make([]byte, entry.Size)
+				io.ReadFull(r, mountedDiskImage)
+				r.Close()
+			} else {
+				if path == ".." && insideDiskimage {
+					insideDiskimage = false
+					CurrentPath = lastPath
+				} else {
+					err = c.ChangeDir(path)
+					if err != nil {
+						log.Fatal(err)
+					}
+					CurrentPath, err = c.CurrentDir()
+				}
 			}
-			CurrentPath, err = c.CurrentDir()
 			if err != nil {
 				log.Fatal(err)
 			}
 		},
 	}
+}
+
+func getSuffix(entry *ftp.Entry) string {
+	return re.FindStringSubmatch(strings.ToLower(entry.Name))[1]
 }
