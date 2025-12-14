@@ -23,10 +23,10 @@ var offset = [...]int{0x800, 0x2000}
 
 func ScreenControlCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:     "screencontrol",
-		Short:   "Reads one byte from memory",
-		Long:    "Peek reads one byte from memory",
-		GroupID: "platform",
+		Use:     "screenmem",
+		Short:   "Shows the current VIC states of D011/D016/D018 and the memory bank setup",
+		Long:    "Shows the current VIC states of D011/D016/D018 and the memory bank setup",
+		GroupID: "vic",
 		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
 			d11 := ReadFromMemory(0xd011, 1) & 0xff
@@ -34,7 +34,7 @@ func ScreenControlCommand() *cobra.Command {
 			d18 := int(ReadFromMemory(0xd018, 1) & 0xff)
 			vicbank := int(ReadFromMemory(0xdd00, 1)&0xff) & 3
 			screenModeFlag := (d11 >> 5) & 1
-			fmt.Print("\n** Screen Mode and Memory Information **\n\n")
+			fmt.Print("\n** Screen Mode, Sprite and Memory Information **\n\n")
 			fmt.Printf("d011 bitmask:%08b/%02x\n", d11, d11)
 			fmt.Printf("d016 bitmask:%08b/%02x\n", d16, d16)
 			fmt.Printf("d018 bitmask:%08b/%02x\n", d18, d18)

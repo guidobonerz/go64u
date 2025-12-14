@@ -35,8 +35,8 @@ var mountedDiskImage []byte
 func RemoteLsCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "ls [path/diskimage] [filter]",
-		Short:   "List files of the internal file storage like USB Stick etc. via ftp",
-		Long:    "List files of the internal file storage like USB Stick etc. via ftp",
+		Short:   "List files of the internal drive like USB Stick, SD Card, DiskImages, etc.",
+		Long:    "List files of the internal drive like USB Stick, SD Card, DiskImages, etc.",
 		GroupID: "file",
 		Args:    cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
@@ -86,8 +86,8 @@ func RemoteLsCommand() *cobra.Command {
 func RemoteCdCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "cd [path/diskimage]",
-		Short:   "changes the folder on the ultimate64 via ftp",
-		Long:    "changes the folder on the ultimate64 via ftp",
+		Short:   "Change the folder on the internal drive. Makes only sense in REPL mode",
+		Long:    "Change the folder on the internal drive. Makes only sense in REPL mode",
 		GroupID: "file",
 		Args:    cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {

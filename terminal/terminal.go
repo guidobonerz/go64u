@@ -30,8 +30,8 @@ func quitCommand() *cobra.Command {
 func TerminalCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "terminal",
-		Short:   "The terminal",
-		Long:    "The terminal",
+		Short:   "Enter terminal (REPL) mode",
+		Long:    "Enter terminal (REPL) mode",
 		GroupID: "terminal",
 		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
@@ -41,7 +41,7 @@ func TerminalCommand() *cobra.Command {
 }
 
 func run() {
-	fmt.Println("Welcome to the go64u REPL! Type 'quit' to exit.")
+	fmt.Println("Welcome to the go64u REPL mode! Type 'quit' to exit.")
 	replCmd := &cobra.Command{}
 	setup.Setup(replCmd, true)
 	replCmd.AddCommand(quitCommand())

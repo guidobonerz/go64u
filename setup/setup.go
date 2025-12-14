@@ -8,11 +8,12 @@ import (
 
 func Setup(cmd *cobra.Command, skipTerminal bool) {
 	cmd.CompletionOptions.DisableDefaultCmd = true
-	cmd.AddGroup(&cobra.Group{ID: "platform", Title: "Platform Commands"})
-	cmd.AddGroup(&cobra.Group{ID: "file", Title: "File Commands"})
-	cmd.AddGroup(&cobra.Group{ID: "machine", Title: "Machine Commands"})
-	cmd.AddGroup(&cobra.Group{ID: "runner", Title: "Runner Commands"})
-	cmd.AddGroup(&cobra.Group{ID: "stream", Title: "Stream Commands"})
+	cmd.AddGroup(&cobra.Group{ID: "platform", Title: "Platform related Commands"})
+	cmd.AddGroup(&cobra.Group{ID: "file", Title: "File related Commands"})
+	cmd.AddGroup(&cobra.Group{ID: "machine", Title: "Machine related Commands"})
+	cmd.AddGroup(&cobra.Group{ID: "runner", Title: "Runner related Commands"})
+	cmd.AddGroup(&cobra.Group{ID: "stream", Title: "Stream related Commands"})
+	cmd.AddGroup(&cobra.Group{ID: "vic", Title: "VIC related Commands"})
 
 	cmd.AddCommand(commands.VersionCommand())
 	cmd.AddCommand(commands.WriteMemoryCommand())
