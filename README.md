@@ -15,4 +15,4 @@ Current functions
 * navigate through internal storage vis ls/cd over ftp connection
 * terminal
 
-![alt text](https://github.com/guidobonerz/go64u/blob/main/doc/Screenshot 2025-12-14 160607.png?raw=true)
+![alt text](https://github.com/guidobonerz/go64u/blob/main/doc/list.png?raw=true)
