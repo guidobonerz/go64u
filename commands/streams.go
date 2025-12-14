@@ -88,6 +88,7 @@ func stream(name string, command string) {
 }
 
 func readVideoStream(port int) {
+
 	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		fmt.Println("Error resolving address:", err)
@@ -108,6 +109,7 @@ func readVideoStream(port int) {
 	capture := false
 	imageData := make([]byte, 384*272/2)
 	for socket != nil && running {
+
 		_, _, err := socket.ReadFromUDP(dataBuffer)
 		if err != nil {
 			fmt.Println("Error receiving:", err)
@@ -116,7 +118,9 @@ func readVideoStream(port int) {
 		var linenumber = util.GetWordFromArray(4, dataBuffer)
 		if linenumber&0x8000 == 0x8000 {
 			capture = true
+
 			if count == 68 {
+				log.Println("read stream")
 				capture = false
 				if writeImage(imageData, scaleFactor) {
 					running = false
