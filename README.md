@@ -4,7 +4,7 @@ Ultimate64 CLI
 
 Current functions
 * get rest api version
-* get get device information (fpga version etc.)
+* get get device information (fpga version, etc.)
 * mount/unmount disk images
 * reset/reboot/pause/resume machine
 * poke/peek value in/from memory
@@ -12,5 +12,7 @@ Current functions
 * load and run local prg/crt over dma
 * make screenshot as png
 * show current vic/bank setup (d011/d016/d018/dd00)
+* navigate through internal storage vis ls/cd over ftp connection
+* terminal
 
-
+![image info](doc/Screenshot 2025-12-14 160607.png)
