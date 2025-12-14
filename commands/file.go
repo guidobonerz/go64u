@@ -71,7 +71,6 @@ func RemoteLsCommand() *cobra.Command {
 						start = fmt.Sprintf("%04x", util.GetWordFromArray(0, content[:]))
 
 					}
-
 					icon := extensionIcon[suffix]
 					if icon == "" {
 						icon = extensionIcon["default"]
@@ -80,14 +79,13 @@ func RemoteLsCommand() *cobra.Command {
 					fmt.Printf("%s %s%-6s|%s|%s%s\n", icon, util.Gray, fmt.Sprintf("%6s %-3s", valueParts[0], valueParts[1]), start, util.Blue, entry.Name)
 				}
 			}
-
 		},
 	}
 }
 
 func RemoteCdCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:     "cd [path]",
+		Use:     "cd [path/diskimage]",
 		Short:   "changes the folder on the ultimate64 via ftp",
 		Long:    "changes the folder on the ultimate64 via ftp",
 		GroupID: "file",
