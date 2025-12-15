@@ -33,7 +33,7 @@ var entry *ftp.Entry
 var mountedDiskImage []byte
 
 func RemoteLsCommand() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:     "ls [path/diskimage] [filter]",
 		Short:   "List files of the internal drive like USB Stick, SD Card, DiskImages, etc.",
 		Long:    "List files of the internal drive like USB Stick, SD Card, DiskImages, etc.",
@@ -54,33 +54,42 @@ func RemoteLsCommand() *cobra.Command {
 				if entry.Type == ftp.EntryTypeFolder {
 					fmt.Printf("%s %s%s\n", extensionIcon["dir"], util.Green, entry.Name)
 				} else {
-
+					var address = ""
 					suffix := getSuffix(entry)
-					var start = "----"
-					var err error
-					var r *ftp.Response
-					if suffix == "prg" {
-						r, err = c.Retr(fmt.Sprintf("%s/%s", path, entry.Name))
-						if err != nil {
-							log.Printf("Error: %v\n", err)
-							continue
-						}
-						var content [2]byte
-						io.ReadFull(r, content[:])
-						r.Close()
-						start = fmt.Sprintf("%04x", util.GetWordFromArray(0, content[:]))
+					showStart, _ := cmd.Flags().GetBool("showaddress")
+					if showStart {
+						address = "|----"
+						var err error
+						var r *ftp.Response
+						if suffix == "prg" {
 
+							r, err = c.Retr(fmt.Sprintf("%s/%s", path, entry.Name))
+							if err != nil {
+								log.Printf("Error: %v\n", err)
+								continue
+							}
+							var content [2]byte
+							io.ReadFull(r, content[:])
+							r.Close()
+							address = fmt.Sprintf("|%04x", util.GetWordFromArray(0, content[:]))
+
+						}
 					}
 					icon := extensionIcon[suffix]
 					if icon == "" {
 						icon = extensionIcon["default"]
 					}
 					valueParts := strings.Fields(humanize.Bytes(entry.Size))
-					fmt.Printf("%s %s%-6s|%s|%s%s\n", icon, util.Gray, fmt.Sprintf("%6s %-3s", valueParts[0], valueParts[1]), start, util.Blue, entry.Name)
+					fmt.Printf("%s %s%-6s%s|%s%s\n", icon, util.Gray, fmt.Sprintf("%6s %-3s", valueParts[0], valueParts[1]), address, util.Blue, entry.Name)
 				}
 			}
+			//cmd.Flags().Set("showaddress", "false")
+
 		},
 	}
+	cmd.Flags().BoolP("showaddress", "s", false, "displays the start address of a program if possible")
+
+	return cmd
 }
 
 func RemoteCdCommand() *cobra.Command {

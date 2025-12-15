@@ -6,6 +6,9 @@ import (
 	"log"
 	"os"
 	"strconv"
+
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 var Reset = "\033[0m"
@@ -17,6 +20,22 @@ var Magenta = "\033[35m"
 var Cyan = "\033[36m"
 var Gray = "\033[37m"
 var White = "\033[97m"
+
+func RedText(text string) string {
+	return fmt.Sprintf("\033[31m%s\033[0m", text)
+}
+func WhiteText(text string) string {
+	return fmt.Sprintf("\033[97m%s\033[0m", text)
+}
+func YellowText(text string) string {
+	return fmt.Sprintf("\033[33m%s\033[0m", text)
+}
+func GreenText(text string) string {
+	return fmt.Sprintf("\033[32m%s\033[0m", text)
+}
+func BlueText(text string) string {
+	return fmt.Sprintf("\033[34m%s\033[0m", text)
+}
 
 var ASCIIToScreenCodeLowercase = [128]byte{
 	// 0x00-0x1F: Control characters
@@ -216,4 +235,14 @@ func ReadFile(fileName string) ([]byte, error) {
 		log.Fatal(err)
 	}
 	return bytes, err
+}
+
+func ResetAllFlags(cmd *cobra.Command) {
+	cmd.Flags().VisitAll(func(flag *pflag.Flag) {
+		flag.Value.Set(flag.DefValue)
+		flag.Changed = false
+	})
+	for _, subCmd := range cmd.Commands() {
+		ResetAllFlags(subCmd)
+	}
 }

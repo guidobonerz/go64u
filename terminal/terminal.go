@@ -58,5 +58,6 @@ func run() {
 		if err := replCmd.Execute(); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		}
+		util.ResetAllFlags(replCmd)
 	}
 }
