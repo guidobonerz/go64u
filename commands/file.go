@@ -15,6 +15,7 @@ import (
 )
 
 var CurrentPath string = ""
+var lastPath string = ""
 
 var extensionIcon = map[string]string{
 
@@ -27,12 +28,15 @@ var extensionIcon = map[string]string{
 	"tap":     "\U0001F4FC",
 	"default": "\U0001F4C4"}
 var re = regexp.MustCompile(`\.(\w+)$`)
+var insideDiskimage bool
+var entry *ftp.Entry
+var mountedDiskImage []byte
 
 func RemoteLsCommand() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:     "ls [path/diskimage] [filter]",
-		Short:   "List files of the internal file storage like USB Stick etc. via ftp",
-		Long:    "List files of the internal file storage like USB Stick etc. via ftp",
+		Short:   "List files of the internal drive like USB Stick, SD Card, DiskImages, etc.",
+		Long:    "List files of the internal drive like USB Stick, SD Card, DiskImages, etc.",
 		GroupID: "file",
 		Args:    cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
@@ -50,41 +54,49 @@ func RemoteLsCommand() *cobra.Command {
 				if entry.Type == ftp.EntryTypeFolder {
 					fmt.Printf("%s %s%s\n", extensionIcon["dir"], util.Green, entry.Name)
 				} else {
+					var address = ""
+					suffix := getSuffix(entry)
+					showStart, _ := cmd.Flags().GetBool("showaddress")
+					if showStart {
+						address = "|----"
+						var err error
+						var r *ftp.Response
+						if suffix == "prg" {
 
-					suffix := re.FindStringSubmatch(strings.ToLower(entry.Name))[1]
-					var start = "----"
-					var err error
-					var r *ftp.Response
-					if suffix == "prg" {
-						r, err = c.Retr(fmt.Sprintf("%s/%s", path, entry.Name))
-						if err != nil {
-							log.Printf("Error: %v\n", err)
-							continue
+							r, err = c.Retr(fmt.Sprintf("%s/%s", path, entry.Name))
+							if err != nil {
+								log.Printf("Error: %v\n", err)
+								continue
+							}
+							var content [2]byte
+							io.ReadFull(r, content[:])
+							r.Close()
+							address = fmt.Sprintf("|%04x", util.GetWordFromArray(0, content[:]))
+
 						}
-						var content [2]byte
-						io.ReadFull(r, content[:])
-						r.Close()
-						start = fmt.Sprintf("%04x", util.GetWordFromArray(0, content[:]))
-
 					}
-
 					icon := extensionIcon[suffix]
 					if icon == "" {
 						icon = extensionIcon["default"]
 					}
-					fmt.Printf("%s %s%-6s|%s|%s%s\n", icon, util.Gray, humanize.Bytes(entry.Size), start, util.Blue, entry.Name)
+					valueParts := strings.Fields(humanize.Bytes(entry.Size))
+					fmt.Printf("%s %s%-6s%s|%s%s\n", icon, util.Gray, fmt.Sprintf("%6s %-3s", valueParts[0], valueParts[1]), address, util.Blue, entry.Name)
 				}
 			}
+			//cmd.Flags().Set("showaddress", "false")
 
 		},
 	}
+	cmd.Flags().BoolP("showaddress", "s", false, "displays the start address of a program if possible")
+
+	return cmd
 }
 
 func RemoteCdCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:     "cd [path]",
-		Short:   "changes the folder on the ultimate64 via ftp",
-		Long:    "changes the folder on the ultimate64 via ftp",
+		Use:     "cd [path/diskimage]",
+		Short:   "Change the folder on the internal drive. Makes only sense in REPL mode",
+		Long:    "Change the folder on the internal drive. Makes only sense in REPL mode",
 		GroupID: "file",
 		Args:    cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
@@ -94,14 +106,37 @@ func RemoteCdCommand() *cobra.Command {
 				path = args[0]
 			}
 
-			err := c.ChangeDir(path)
-			if err != nil {
-				log.Fatal(err)
+			var err error
+
+			entry, err = c.GetEntry(path)
+			if entry.Type == ftp.EntryTypeFile && !insideDiskimage && getSuffix(entry) == "d64" {
+				insideDiskimage = true
+				lastPath = CurrentPath
+				CurrentPath = fmt.Sprintf("%s/%s", CurrentPath, entry.Name)
+				var r *ftp.Response
+				r, err = c.Retr(CurrentPath)
+				mountedDiskImage = make([]byte, entry.Size)
+				io.ReadFull(r, mountedDiskImage)
+				r.Close()
+			} else {
+				if path == ".." && insideDiskimage {
+					insideDiskimage = false
+					CurrentPath = lastPath
+				} else {
+					err = c.ChangeDir(path)
+					if err != nil {
+						log.Fatal(err)
+					}
+					CurrentPath, err = c.CurrentDir()
+				}
 			}
-			CurrentPath, err = c.CurrentDir()
 			if err != nil {
 				log.Fatal(err)
 			}
 		},
 	}
+}
+
+func getSuffix(entry *ftp.Entry) string {
+	return re.FindStringSubmatch(strings.ToLower(entry.Name))[1]
 }

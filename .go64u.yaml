@@ -1,4 +1,4 @@
-ipaddress: 10.100.200.230
+ipaddress: 1.2.3.4
 stream:
   video:
     port: 11000
@@ -6,7 +6,5 @@ stream:
     port: 11001
   debug:
     port: 11002
-dump:
-  folder: .
-screenshot:
-  folder: .
+dumpFolder: .
+screenshotFolder: .

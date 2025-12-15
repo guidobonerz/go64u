@@ -10,29 +10,17 @@ import (
 var config Config
 
 type Config struct {
-	IpAddress  string `yaml:"ipaddress"`
-	Password   string `yaml:"password"`
-	Stream     Stream `yaml:"stream"`
-	Screenshot Folder `yaml:"screenshot"`
-	Dump       Folder `yaml:"dump"`
+	IpAddress        string `yaml:"ipaddress"`
+	Password         string `yaml:"password"`
+	Stream           Stream `yaml:"stream"`
+	ScreenshotFolder string `yaml:"screenshotFolder"`
+	DumpFolder       string `yaml:"dumpFolder"`
 }
 
 type Stream struct {
 	Audio Audio `yaml:"audio"`
 	Video Video `yaml:"video"`
 	Debug Debug `yaml:"debug"`
-}
-
-type Screenshot struct {
-	Folder string `yaml:"folder"`
-}
-
-type Dump struct {
-	Folder string `yaml:"folder"`
-}
-
-type Folder struct {
-	Folder string `yaml:"folder"`
 }
 
 type Audio struct {
@@ -46,7 +34,7 @@ type Debug struct {
 }
 
 func ReadConfig() {
-	data, err := os.ReadFile(".go64u.yaml")
+	data, err := os.ReadFile(os.Getenv("GO64U_CONFIG"))
 	if err != nil {
 		log.Fatalf("Error reading config file: %v", err)
 	}
