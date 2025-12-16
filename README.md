@@ -12,7 +12,7 @@ Current functions
 * load and run local prg/crt over dma
 * make screenshot as png
 * show current vic/bank setup (d011/d016/d018/dd00)
-* navigate through internal storage vis ls/cd over ftp connection
+* navigate through internal storage via ls/cd over ftp connection
 * terminal
 
 ![Styled Directory](https://github.com/guidobonerz/go64u/blob/develop/doc/list.png)
