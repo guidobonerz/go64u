@@ -1,9 +1,6 @@
 package commands
 
 import (
-	"de/drazil/go64u/config"
-	"de/drazil/go64u/network"
-	"de/drazil/go64u/util"
 	"fmt"
 	"image"
 	"image/png"
@@ -13,6 +10,10 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"drazil.de/go64u/config"
+	"drazil.de/go64u/network"
+	"drazil.de/go64u/util"
 
 	"github.com/nfnt/resize"
 	"github.com/spf13/cobra"

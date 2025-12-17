@@ -1,10 +1,11 @@
 package commands
 
 import (
-	"de/drazil/go64u/network"
 	"fmt"
 	"log"
 	"net/http"
+
+	"drazil.de/go64u/network"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"

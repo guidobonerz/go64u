@@ -1,11 +1,12 @@
 package main
 
 import (
-	"de/drazil/go64u/config"
-	"de/drazil/go64u/setup"
-	"de/drazil/go64u/terminal"
-	"de/drazil/go64u/util"
 	"os"
+
+	"drazil.de/go64u/config"
+	"drazil.de/go64u/setup"
+	"drazil.de/go64u/terminal"
+	"drazil.de/go64u/util"
 
 	"github.com/spf13/cobra"
 )
