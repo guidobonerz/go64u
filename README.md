@@ -16,3 +16,10 @@ Current functions
 * terminal
 
 ![Styled Directory](https://github.com/guidobonerz/go64u/blob/develop/doc/list.png)
+
+# Todo's
+* add streaming client
+* show screenshot directly in console (sixel, if supported)
+* and much more
+* list and change dir (local and remote)
+* disassembler with dialect option

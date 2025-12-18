@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"drazil.de/go64u/config"
@@ -20,6 +21,9 @@ var rootCmd = &cobra.Command{
 func main() {
 	config.ReadConfig()
 	setup.Setup(rootCmd, false)
+	if os.Getenv("TERM") != "" {
+		fmt.Println("Terminal support Grafik")
+	}
 
 	rootCmd.AddGroup(&cobra.Group{ID: "terminal", Title: util.YellowText("Terminal Commands")})
 
