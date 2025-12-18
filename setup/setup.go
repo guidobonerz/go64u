@@ -1,8 +1,8 @@
 package setup
 
 import (
-	"de/drazil/go64u/commands"
-	"de/drazil/go64u/util"
+	"drazil.de/go64u/commands"
+	"drazil.de/go64u/util"
 
 	"github.com/spf13/cobra"
 )

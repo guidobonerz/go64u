@@ -1,10 +1,11 @@
 package network
 
 import (
-	"de/drazil/go64u/config"
 	"fmt"
 	"log"
 	"time"
+
+	"drazil.de/go64u/config"
 
 	"github.com/jlaffaye/ftp"
 )

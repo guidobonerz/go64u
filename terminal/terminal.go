@@ -3,10 +3,10 @@ package terminal
 import (
 	"bufio"
 
-	"de/drazil/go64u/commands"
-	"de/drazil/go64u/setup"
+	"drazil.de/go64u/commands"
+	"drazil.de/go64u/setup"
 
-	"de/drazil/go64u/util"
+	"drazil.de/go64u/util"
 
 	"fmt"
 	"log"

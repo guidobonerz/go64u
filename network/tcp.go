@@ -1,9 +1,10 @@
 package network
 
 import (
-	"de/drazil/go64u/config"
 	"fmt"
 	"net"
+
+	"drazil.de/go64u/config"
 )
 
 func SendTcpData(payload []byte) {

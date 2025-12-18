@@ -1,11 +1,12 @@
 package commands
 
 import (
-	"de/drazil/go64u/network"
-	"de/drazil/go64u/util"
 	"fmt"
 	"net/http"
 	"strings"
+
+	"drazil.de/go64u/network"
+	"drazil.de/go64u/util"
 
 	"github.com/spf13/cobra"
 )

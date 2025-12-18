@@ -2,11 +2,12 @@ package network
 
 import (
 	"bytes"
-	"de/drazil/go64u/config"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+
+	"drazil.de/go64u/config"
 )
 
 func Execute(action string, method string, data []byte) []byte {

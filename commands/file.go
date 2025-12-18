@@ -1,13 +1,16 @@
 package commands
 
 import (
-	"de/drazil/go64u/network"
-	"de/drazil/go64u/util"
 	"fmt"
 	"io"
 	"log"
 	"regexp"
 	"strings"
+
+	"drazil.de/cmm/cbm"
+	"drazil.de/cmm/media"
+	"drazil.de/go64u/network"
+	"drazil.de/go64u/util"
 
 	"github.com/dustin/go-humanize"
 	"github.com/jlaffaye/ftp"
@@ -28,18 +31,19 @@ var extensionIcon = map[string]string{
 	"tap":     "\U0001F4FC",
 	"default": "\U0001F4C4"}
 var re = regexp.MustCompile(`\.(\w+)$`)
-var insideDiskimage bool
+var insideDiskimage = false
 var entry *ftp.Entry
 var mountedDiskImage []byte
 
-func RemoteLsCommand() *cobra.Command {
+func RemoteFindCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "ls [path/diskimage]",
-		Short:   "List files of the internal drive like USB Stick, SD Card, DiskImages, etc.",
-		Long:    "List files of the internal drive like USB Stick, SD Card, DiskImages, etc.",
+		Use:     "find []",
+		Short:   "Find files in the internal drive like USB Stick, SD Card, DiskImages, etc.",
+		Long:    "Find files in the internal drive like USB Stick, SD Card, DiskImages, etc.",
 		GroupID: "file",
 		Args:    cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
+
 			var c = network.GetFtpConnection()
 			path := CurrentPath
 			if len(args) > 0 {
@@ -97,6 +101,104 @@ func RemoteLsCommand() *cobra.Command {
 	return cmd
 }
 
+func RemoteLsCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "ls [path/diskimage]",
+		Short:   "List files of the internal drive like USB Stick, SD Card, DiskImages, etc.",
+		Long:    "List files of the internal drive like USB Stick, SD Card, DiskImages, etc.",
+		GroupID: "file",
+		Args:    cobra.MaximumNArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			var c = network.GetFtpConnection()
+			diskImage := &cbm.CbmDiskImage{}
+			if insideDiskimage {
+				var r *ftp.Response
+
+				entry, err := c.GetEntry(CurrentPath)
+				if err != nil {
+					log.Fatal(err)
+				}
+				r, err = c.Retr(CurrentPath)
+				if err != nil {
+					log.Fatal(err)
+				}
+
+				mountedDiskImage = make([]byte, entry.Size)
+
+				io.ReadFull(r, mountedDiskImage)
+				pathFragments := strings.Split(CurrentPath, "/")
+				fileName := pathFragments[len(pathFragments)-1]
+
+				r.Close()
+				diskImage.Initialze(mountedDiskImage, fileName[len(fileName)-3:])
+				e := diskImage.GetEntries(media.MediaEntry{})
+				for _, e := range e {
+					icon := extensionIcon[strings.ToLower(e.FileType)]
+					if icon == "" {
+						icon = extensionIcon["default"]
+					}
+					valueParts := strings.Fields(humanize.Bytes(uint64(e.Size)))
+					fmt.Printf("%s %s%-6s%s|%s%s\n", icon, util.Gray, fmt.Sprintf("%6s %-3s", valueParts[0], valueParts[1]), "", util.Blue, e.Name+"."+strings.ToLower(e.FileType))
+				}
+
+			} else {
+
+				path := CurrentPath
+				if len(args) > 0 {
+					path = args[0]
+				}
+				entries, err := c.List(path)
+				if err != nil {
+					log.Fatal(err)
+				}
+
+				for _, entry := range entries {
+					f, _ := cmd.Flags().GetString("filter")
+					if filter(entry.Name, f) {
+						if entry.Type == ftp.EntryTypeFolder {
+							fmt.Printf("%s %s%s\n", extensionIcon["dir"], util.Green, entry.Name)
+						} else {
+							var address = ""
+							suffix := getSuffix(entry)
+							showStart, _ := cmd.Flags().GetBool("memaddress")
+							if showStart {
+								address = "|----"
+								var err error
+								var r *ftp.Response
+								if suffix == "prg" {
+									r, err = c.Retr(fmt.Sprintf("%s/%s", path, entry.Name))
+									if err != nil {
+										log.Printf("Error: %v\n", err)
+										continue
+									}
+									var content [2]byte
+									io.ReadFull(r, content[:])
+									r.Close()
+									address = fmt.Sprintf("|%04x", util.GetWordFromArray(0, content[:]))
+
+								}
+
+							}
+							icon := extensionIcon[suffix]
+							if icon == "" {
+								icon = extensionIcon["default"]
+							}
+							valueParts := strings.Fields(humanize.Bytes(entry.Size))
+							fmt.Printf("%s %s%-6s%s|%s%s\n", icon, util.Gray, fmt.Sprintf("%6s %-3s", valueParts[0], valueParts[1]), address, util.Blue, entry.Name)
+						}
+					}
+				}
+			}
+
+		},
+	}
+	cmd.Flags().BoolP("memaddress", "m", false, "displays the start address of a program if possible")
+	cmd.Flags().StringP("filter", "f", "", "filters the list by a match pattern like '*.prg'")
+	//cmd.Flags().BoolP("sort", "s", false, "displays the start address of a program if possible")
+
+	return cmd
+}
+
 func RemoteCdCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "cd [path/diskimage]",
@@ -119,11 +221,6 @@ func RemoteCdCommand() *cobra.Command {
 				insideDiskimage = true
 				lastPath = CurrentPath
 				CurrentPath = fmt.Sprintf("%s/%s", CurrentPath, entry.Name)
-				var r *ftp.Response
-				r, err = c.Retr(CurrentPath)
-				mountedDiskImage = make([]byte, entry.Size)
-				io.ReadFull(r, mountedDiskImage)
-				r.Close()
 			} else {
 				if path == ".." && insideDiskimage {
 					insideDiskimage = false
@@ -144,7 +241,12 @@ func RemoteCdCommand() *cobra.Command {
 }
 
 func getSuffix(entry *ftp.Entry) string {
-	return re.FindStringSubmatch(strings.ToLower(entry.Name))[1]
+	parts := re.FindStringSubmatch(strings.ToLower(entry.Name))
+	if len(parts) > 1 {
+		return parts[1]
+	} else {
+		return "default"
+	}
 }
 func filter(name string, pattern string) bool {
 	match := false
