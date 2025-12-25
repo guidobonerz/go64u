@@ -9,6 +9,7 @@ import (
 
 	"drazil.de/cmm/cbm"
 	"drazil.de/cmm/media"
+	"drazil.de/go64u/config"
 	"drazil.de/go64u/network"
 	"drazil.de/go64u/util"
 
@@ -44,7 +45,7 @@ func RemoteFindCommand() *cobra.Command {
 		Args:    cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 
-			var c = network.GetFtpConnection()
+			var c = network.GetFtpConnection(config.GetConfig().SelectedDevice)
 			path := CurrentPath
 			if len(args) > 0 {
 				path = args[0]
@@ -109,8 +110,8 @@ func RemoteLsCommand() *cobra.Command {
 		GroupID: "file",
 		Args:    cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			var c = network.GetFtpConnection()
-			diskImage := &cbm.CbmDiskImage{}
+			var c = network.GetFtpConnection(config.GetConfig().SelectedDevice)
+			diskImage := &cbm.MediaImage{}
 			if insideDiskimage {
 				var r *ftp.Response
 
@@ -131,7 +132,7 @@ func RemoteLsCommand() *cobra.Command {
 
 				r.Close()
 				diskImage.Initialze(mountedDiskImage, fileName[len(fileName)-3:])
-				e := diskImage.GetEntries(media.MediaEntry{})
+				e := diskImage.GetEntries(media.Entry{})
 				for _, e := range e {
 					icon := extensionIcon[strings.ToLower(e.FileType)]
 					if icon == "" {
@@ -207,7 +208,7 @@ func RemoteCdCommand() *cobra.Command {
 		GroupID: "file",
 		Args:    cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			var c = network.GetFtpConnection()
+			var c = network.GetFtpConnection(config.GetConfig().SelectedDevice)
 
 			path := ""
 			if len(args) > 0 {

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"drazil.de/go64u/config"
 	"drazil.de/go64u/network"
 	"drazil.de/go64u/util"
 
@@ -15,6 +16,47 @@ import (
 var peekLength uint16
 var output string
 var outputtype string
+
+func ActiveDeviceCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:     "device",
+		Short:   "Sets the active device regarding config name",
+		Long:    "Sets the active device regarding config name.",
+		GroupID: "machine",
+		Args:    cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			if config.GetConfig().Devices[args[0]] == nil {
+				fmt.Print(util.RedText(fmt.Sprintf("unknown device: %s\n", args[0])))
+			} else {
+				config.GetConfig().SelectedDevice = args[0]
+				fmt.Printf("current device is: %s\n", args[0])
+			}
+		},
+	}
+}
+
+func ShowDevicesCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:     "devices",
+		Short:   "show device configurations",
+		Long:    "show device configurations",
+		GroupID: "machine",
+		Args:    cobra.ExactArgs(0),
+		Run: func(cmd *cobra.Command, args []string) {
+
+			for deviceName, device := range config.GetConfig().Devices {
+				fmt.Printf("Device Name: %s\n", deviceName)
+				fmt.Printf("  Description: %s\n", device.Description)
+				fmt.Printf("  IP Address: %s\n", device.IpAddress)
+				fmt.Printf("  Video Port: %d\n", device.VideoPort)
+				fmt.Printf("  Audio Port: %d\n", device.AudioPort)
+				fmt.Printf("  Debug Port: %d\n", device.DebugPort)
+				fmt.Printf("  Is Default: %v\n", device.IsDefault)
+				fmt.Println("----------------------------")
+			}
+		},
+	}
+}
 
 func ResetCommand() *cobra.Command {
 	return &cobra.Command{

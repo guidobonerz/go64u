@@ -8,7 +8,7 @@ import (
 )
 
 func SendTcpData(payload []byte) {
-	conn, err := net.Dial("tcp", fmt.Sprintf("%s:64", config.GetConfig().IpAddress))
+	conn, err := net.Dial("tcp", fmt.Sprintf("%s:64", config.GetConfig().Devices[config.GetConfig().SelectedDevice].IpAddress))
 	if err != nil {
 		panic(err)
 	}

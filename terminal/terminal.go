@@ -41,10 +41,12 @@ func TerminalCommand() *cobra.Command {
 }
 
 func run() {
-	fmt.Println("Welcome to the go64u REPL mode! Type 'quit' to exit.")
+	fmt.Println("Welcome to the go64u terminal mode! Type 'quit' to exit.")
 	replCmd := &cobra.Command{}
 	setup.Setup(replCmd, true)
 	replCmd.AddCommand(quitCommand())
+	replCmd.AddCommand(commands.RemoteCdCommand())
+	replCmd.AddCommand(commands.StreamControllerCommand())
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
 		fmt.Printf("%s%s: ", util.White, commands.CurrentPath)
