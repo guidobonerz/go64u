@@ -4,44 +4,44 @@ import (
 	"log"
 	"os"
 
+	"github.com/jlaffaye/ftp"
 	"gopkg.in/yaml.v3"
 )
 
 var config Config
 
 type Config struct {
-	IpAddress        string `yaml:"ipaddress"`
-	Password         string `yaml:"password"`
-	Stream           Stream `yaml:"stream"`
-	ScreenshotFolder string `yaml:"screenshotFolder"`
-	DumpFolder       string `yaml:"dumpFolder"`
+	Password         string             `yaml:"Password"`
+	Devices          map[string]*Device `yaml:"Devices"`
+	ScreenshotFolder string             `yaml:"ScreenshotFolder"`
+	DumpFolder       string             `yaml:"DumpFolder"`
+	SelectedDevice   string             `yaml:"SelectedDevice"`
 }
 
-type Stream struct {
-	Audio Audio `yaml:"audio"`
-	Video Video `yaml:"video"`
-	Debug Debug `yaml:"debug"`
-}
-
-type Audio struct {
-	Port int `yaml:"port"`
-}
-type Video struct {
-	Port int `yaml:"port"`
-}
-type Debug struct {
-	Port int `yaml:"port"`
+type Device struct {
+	Description   string          `yaml:"Description"`
+	IsDefault     bool            `yaml:"IsDefault"`
+	IpAddress     string          `yaml:"IpAddress"`
+	AudioPort     int             `yaml:"AudioPort"`
+	VideoPort     int             `yaml:"VideoPort"`
+	DebugPort     int             `yaml:"DebugPort"`
+	FtpConnection *ftp.ServerConn `yaml:"-"`
 }
 
 func ReadConfig() {
-	data, err := os.ReadFile(os.Getenv("GO64U_CONFIG"))
-	if err != nil {
-		log.Fatalf("Error reading config file: %v", err)
-	}
+	configFile := os.Getenv("GO64U_CONFIG")
+	if configFile != "" {
+		data, err := os.ReadFile(configFile)
+		if err != nil {
+			log.Fatalf("Error reading config file: %v", err)
+		}
 
-	err = yaml.Unmarshal(data, &config)
-	if err != nil {
-		log.Fatalf("Error parsing config file: %v", err)
+		err = yaml.Unmarshal(data, &config)
+		if err != nil {
+			log.Fatalf("Error parsing config file: %v", err)
+		}
+	} else {
+		panic("Environment variable GO64U_CONFIG not set.")
 	}
 }
 

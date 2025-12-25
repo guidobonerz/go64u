@@ -4,17 +4,21 @@ import (
 	"fmt"
 	"image"
 	"image/png"
+	"io"
 	"log"
 	"net"
-	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"drazil.de/go64u/config"
 	"drazil.de/go64u/network"
 	"drazil.de/go64u/util"
 
+	"github.com/ebitengine/oto/v3"
+	"github.com/fogleman/gg"
+	"github.com/mattn/go-sixel"
 	"github.com/nfnt/resize"
 	"github.com/spf13/cobra"
 )
@@ -25,6 +29,11 @@ protected final static int VIC_STREAM_START_COMMAND = 0xff20;
 	protected final static int VIC_STREAM_STOP_COMMAND = 0xff30;
 */
 var scaleFactor = 100
+var showAsSixel = false
+
+const WIDTH = 384
+const HEIGHT = 272
+const SIZE = WIDTH * HEIGHT
 
 func VideoStreamCommand() *cobra.Command {
 	return &cobra.Command{
@@ -52,6 +61,27 @@ func AudioStreamCommand() *cobra.Command {
 	}
 }
 
+func StreamControllerCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:     "streamcontroller",
+		Short:   "Starts/Stops streams & channels",
+		Long:    "Starts/Stops streams & channels",
+		GroupID: "stream",
+		Args:    cobra.ExactArgs(0),
+		Run: func(cmd *cobra.Command, args []string) {
+			var controlPanel strings.Builder
+			i := 1
+			for deviceName := range config.GetConfig().Devices {
+				controlPanel.WriteString(fmt.Sprintf("[%02d]%s ", i, deviceName))
+				i++
+			}
+			controlPanel.WriteString(" [A]udio [V]ideo [B]oth [Q]uit")
+			fmt.Println(controlPanel.String())
+			//stream("audio", args[0])
+		},
+	}
+}
+
 func DebugStreamCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "debug [command]",
@@ -73,28 +103,114 @@ func ScreenshotCommand() *cobra.Command {
 		GroupID: "vic",
 		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
+			showAsSixel, _ = cmd.Flags().GetBool("sixel")
 			stream("video", "start")
+			//stopVideoStream()
 		},
 	}
 	cmd.Flags().IntVarP(&scaleFactor, "scale", "s", 100, "scale factor in percent(%)")
+	cmd.Flags().Bool("sixel", false, "show screenshot as sixel graphic in terminal if supported")
 	return cmd
 }
 
 func stream(name string, command string) {
 	port := 11000
+	deviceName := "U64I"
 	switch name {
 	case "video":
-		port = config.GetConfig().Stream.Video.Port
+		port = config.GetConfig().Devices[deviceName].VideoPort
+		readVideoStream(port)
 	case "audio":
-		port = config.GetConfig().Stream.Audio.Port
+		port = config.GetConfig().Devices[deviceName].AudioPort
+		readAudioStream(port)
 	case "debug":
-		port = config.GetConfig().Stream.Debug.Port
+		port = config.GetConfig().Devices[deviceName].DebugPort
 	}
-	var url = fmt.Sprintf("streams/%s:%s?ip=%s:%d", name, command, getOutboundIP().String(), port)
-	network.Execute(url, http.MethodPut, nil)
+
+	//var url = fmt.Sprintf("streams/%s:%s?ip=%s:%d", name, command, getOutboundIP().String(), port)
+	//network.Execute(url, http.MethodPut, nil)
+
 	//startVideoStream(getOutboundIP().String())
-	readVideoStream(port)
-	//stopVideoStream()
+	//time.Sleep(time.Second)
+
+}
+
+func readAudioStream(port int) {
+	op := &oto.NewContextOptions{
+		SampleRate:   48000,
+		ChannelCount: 2,
+		Format:       oto.FormatSignedInt16LE,
+	}
+
+	ctx, readyChan, err := oto.NewContext(op)
+	if err != nil {
+		panic(err)
+	}
+	<-readyChan
+
+	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		fmt.Println("Error resolving address:", err)
+		return
+	}
+	socket, err := net.ListenUDP("udp", &net.UDPAddr{Port: addr.Port})
+	if err != nil {
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			fmt.Println("Read timeout occurred. Maybe audio stream not started")
+			return
+		}
+		panic(err)
+	}
+	defer socket.Close()
+
+	fmt.Printf("Listening on UDP port %d...\n", port)
+
+	pr, pw := io.Pipe()
+	player := ctx.NewPlayer(pr)
+	done := make(chan struct{})
+
+	go func() {
+		defer pw.Close()
+		defer close(done)
+
+		buffer := make([]byte, 770)
+		fmt.Print("\033[s")
+
+		for {
+			n, _, err := socket.ReadFromUDP(buffer)
+			if err != nil {
+				log.Println("UDP read error:", err)
+				break
+			}
+			fmt.Print("\033[u\033[K")
+			fmt.Printf(" sequence: %05d\r", util.GetWordFromArray(0, buffer))
+
+			dataToWrite := buffer[2:n]
+
+			// Write with timeout to prevent indefinite blocking
+			writeDone := make(chan error, 1)
+			go func() {
+				_, err := pw.Write(dataToWrite)
+				writeDone <- err
+			}()
+
+			select {
+			case err := <-writeDone:
+				if err != nil {
+					log.Println("Pipe write error:", err)
+					return
+				}
+			case <-time.After(100 * time.Millisecond):
+				log.Println("Write timeout - player may be stalled")
+				// Could drop packet or exit here
+				player.Play()
+			}
+		}
+	}()
+
+	player.Play()
+
+	select {}
 }
 
 func readVideoStream(port int) {
@@ -109,7 +225,7 @@ func readVideoStream(port int) {
 	socket.SetReadDeadline(time.Now().Add(5 * time.Second))
 	if err != nil {
 		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-			fmt.Println("Read timeout occurred. Maybe vic stream not started")
+			fmt.Println("Read timeout occurred. Maybe video stream not started")
 			return
 		}
 		panic(err)
@@ -121,13 +237,13 @@ func readVideoStream(port int) {
 	count := 0
 	offset := 0
 	capture := false
-	imageData := make([]byte, 384*272/2)
+	imageData := make([]byte, WIDTH*HEIGHT/2)
 	for socket != nil && running {
 
 		_, _, err := socket.ReadFromUDP(dataBuffer)
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				fmt.Println("Read timeout occurred. Maybe vic stream not started")
+				fmt.Println("Read timeout occurred. Maybe video stream not started")
 				return
 			}
 			panic(err)
@@ -153,29 +269,36 @@ func readVideoStream(port int) {
 }
 
 func writeImage(data []byte, scaleFactor int) bool {
-	img := image.NewPaletted(image.Rect(0, 0, 384, 272), util.GetPalette())
+	img := image.NewPaletted(image.Rect(0, 0, WIDTH, HEIGHT), util.GetPalette())
 	pixelIndex := 0
+
 	for _, b := range data {
 		img.Pix[pixelIndex] = b & 0x0F
 		pixelIndex++
 		img.Pix[pixelIndex] = (b >> 4) & 0x0F
 		pixelIndex++
-		if pixelIndex >= 384*272 {
+		if pixelIndex >= SIZE {
 			break
 		}
 	}
-	millisStr := strconv.FormatInt(time.Now().UnixMilli(), 10)
-	file, err := os.Create(fmt.Sprintf("%sultimate_screenshot_%s.png", config.GetConfig().ScreenshotFolder, millisStr))
-	if err != nil {
-		panic(err)
-	}
-	defer file.Close()
 
-	scaledWidth := float32(384) / float32(100) * float32(scaleFactor)
+	scaledWidth := float32(WIDTH) / float32(100) * float32(scaleFactor)
 
 	scaledImage := resize.Resize(uint(scaledWidth), 0, img, resize.Bicubic)
-	png.Encode(file, scaledImage)
-	fmt.Printf("Screenshot successfully written to %s%s%s\n", util.Green, config.GetConfig().ScreenshotFolder, util.Reset)
+	millisStr := strconv.FormatInt(time.Now().UnixMilli(), 10)
+	if showAsSixel {
+		dc := gg.NewContextForImage(scaledImage)
+		sixel.NewEncoder(os.Stdout).Encode(dc.Image())
+	} else {
+		file, err := os.Create(fmt.Sprintf("%sultimate_screenshot_%s.png", config.GetConfig().ScreenshotFolder, millisStr))
+		if err != nil {
+			panic(err)
+		}
+		defer file.Close()
+
+		png.Encode(file, scaledImage)
+		fmt.Printf("Screenshot successfully written to %s%s%s\n", util.Green, config.GetConfig().ScreenshotFolder, util.Reset)
+	}
 	return true
 }
 

@@ -12,7 +12,8 @@
             //"program": "${fileDirname}",
             "program": "main.go",
             "args": [
-                
+                "audio",
+                "start"
             ]
         }
     ]

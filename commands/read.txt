@@ -1,0 +1,77 @@
+func readAudioStream(port int) {
+	op := &oto.NewContextOptions{
+		SampleRate:   48000,
+		ChannelCount: 2,
+		Format:       oto.FormatSignedInt16LE,
+	}
+
+	ctx, readyChan, err := oto.NewContext(op)
+	if err != nil {
+		panic(err)
+	}
+	<-readyChan
+
+	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		fmt.Println("Error resolving address:", err)
+		return
+	}
+	socket, err := net.ListenUDP("udp", &net.UDPAddr{Port: addr.Port})
+	if err != nil {
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			fmt.Println("Read timeout occurred. Maybe audio stream not started")
+			return
+		}
+		panic(err)
+	}
+	defer socket.Close()
+
+	fmt.Printf("Listening on UDP port %d...\n", port)
+
+	pr, pw := io.Pipe()
+	done := make(chan struct{})
+
+	go func() {
+		defer pw.Close()
+		defer close(done)
+
+		buffer := make([]byte, 770)
+		fmt.Print("\033[s")
+
+		for {
+			n, _, err := socket.ReadFromUDP(buffer)
+			if err != nil {
+				log.Println("UDP read error:", err)
+				break
+			}
+			fmt.Print("\033[u\033[K")
+			fmt.Printf(" sequence: %05d\r", util.GetWordFromArray(0, buffer))
+
+			dataToWrite := buffer[2:n]
+
+			// Write with timeout to prevent indefinite blocking
+			writeDone := make(chan error, 1)
+			go func() {
+				_, err := pw.Write(dataToWrite)
+				writeDone <- err
+			}()
+
+			select {
+			case err := <-writeDone:
+				if err != nil {
+					log.Println("Pipe write error:", err)
+					return
+				}
+			case <-time.After(100 * time.Millisecond):
+				log.Println("Write timeout - player may be stalled")
+				// Could drop packet or exit here
+			}
+		}
+	}()
+
+	player := ctx.NewPlayer(pr)
+	player.Play()
+
+	select {}
+}
+
