@@ -17,7 +17,7 @@ Current functions
 * terminal mode
 * selectable audiostream player (works)
 
-Some commands only available in terminal mode
+Some commands are only available in terminal mode
 * cd (change directory)
 * asc (audio stream controller)
 
@@ -40,7 +40,7 @@ The structure of the file is currently as follows
 ```
 Devices:
   DEVICE_NAME1:
-    Description: "Device Nme"
+    Description: "Device name"
     IsDefault: true
     IpAddress: <ip of device>
     VideoPort: 11000

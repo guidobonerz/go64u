@@ -29,20 +29,37 @@ type Device struct {
 }
 
 func ReadConfig() {
-	configFile := os.Getenv("GO64U_CONFIG")
-	if configFile != "" {
-		data, err := os.ReadFile(configFile)
-		if err != nil {
-			log.Fatalf("Error reading config file: %v", err)
-		}
 
+	data, err := os.ReadFile(".\\.go64u.yaml")
+	if err != nil {
+		//log.Println("No config file found in application folder.")
+	}
+	if data == nil {
+		configFile := os.Getenv("GO64U_CONFIG")
+		if configFile != "" {
+			data, err = os.ReadFile(configFile)
+			if err != nil {
+				//log.Println("No config file found in application folder.")
+			}
+		} else {
+			log.Fatal("Environment variable GO64U_CONFIG not set.")
+		}
+	}
+	if data != nil {
 		err = yaml.Unmarshal(data, &config)
+		for k, c := range config.Devices {
+			if c.IsDefault {
+				config.SelectedDevice = k
+				break
+			}
+		}
 		if err != nil {
 			log.Fatalf("Error parsing config file: %v", err)
 		}
 	} else {
-		panic("Environment variable GO64U_CONFIG not set.")
+		log.Fatal("Unable to start application. Config not found.")
 	}
+
 }
 
 func GetConfig() *Config {

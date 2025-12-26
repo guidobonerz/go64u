@@ -9,12 +9,12 @@ import (
 
 func Setup(cmd *cobra.Command, skipTerminal bool) {
 	cmd.CompletionOptions.DisableDefaultCmd = true
-	cmd.AddGroup(&cobra.Group{ID: "platform", Title: util.YellowText("Platform related Commands")})
-	cmd.AddGroup(&cobra.Group{ID: "file", Title: util.YellowText("File related Commands")})
-	cmd.AddGroup(&cobra.Group{ID: "machine", Title: util.YellowText("Machine related Commands")})
-	cmd.AddGroup(&cobra.Group{ID: "runner", Title: util.YellowText("Runner related Commands")})
-	cmd.AddGroup(&cobra.Group{ID: "stream", Title: util.YellowText("Stream related Commands")})
-	cmd.AddGroup(&cobra.Group{ID: "vic", Title: util.YellowText("VIC related Commands")})
+	cmd.AddGroup(&cobra.Group{ID: "platform", Title: util.YellowText("Platform Commands")})
+	cmd.AddGroup(&cobra.Group{ID: "file", Title: util.YellowText("File Commands")})
+	cmd.AddGroup(&cobra.Group{ID: "machine", Title: util.YellowText("Machine Commands")})
+	cmd.AddGroup(&cobra.Group{ID: "runner", Title: util.YellowText("Runner Commands")})
+	cmd.AddGroup(&cobra.Group{ID: "stream", Title: util.YellowText("Stream Commands")})
+	cmd.AddGroup(&cobra.Group{ID: "vic", Title: util.YellowText("VIC Commands")})
 
 	cmd.AddCommand(commands.VersionCommand())
 	cmd.AddCommand(commands.ActiveDeviceCommand())
