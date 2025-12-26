@@ -19,6 +19,7 @@ var rootCmd = &cobra.Command{
 
 func main() {
 	config.ReadConfig()
+
 	setup.Setup(rootCmd, false)
 
 	rootCmd.AddGroup(&cobra.Group{ID: "terminal", Title: util.YellowText("Terminal Commands")})
@@ -26,6 +27,7 @@ func main() {
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
+
 }
 
 func init() {
