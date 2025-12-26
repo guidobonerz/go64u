@@ -130,8 +130,7 @@ func AudioController() {
 	i := 1
 	fmt.Println("select stream number to play")
 	for deviceName := range config.GetConfig().Devices {
-		fmt.Printf("[% 2d] - %s\n", i, config.GetConfig().Devices[deviceName].Description)
-		//fmt.Println(config.GetConfig().Devices[devices[i-1].Name].Description)
+		fmt.Printf("[% 2d] - %s <%s>\n", i, config.GetConfig().Devices[deviceName].Description, config.GetConfig().Devices[deviceName].IpAddress)
 		devices = append(devices, Device{Name: deviceName, Index: i})
 		i++
 	}
