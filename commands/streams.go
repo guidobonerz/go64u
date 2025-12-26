@@ -131,7 +131,7 @@ func AudioController() {
 	fmt.Println("select stream number to play")
 	for deviceName := range config.GetConfig().Devices {
 		device := config.GetConfig().Devices[deviceName]
-		fmt.Printf("[% 2d] - %s <%s:%s>\n", i, device.Description, device.IpAddress, device.AudioPort)
+		fmt.Printf("[% 2d] - %s <%s:%d>\n", i, device.Description, device.IpAddress, device.AudioPort)
 		devices = append(devices, Device{Name: deviceName, Index: i})
 		i++
 	}
@@ -149,8 +149,8 @@ func AudioController() {
 				port := config.GetConfig().Devices[devices[i-1].Name].AudioPort
 				if lastStreamId != i-1 {
 					lastStreamId = i - 1
-					stopChan = make(chan struct{})
 					stopStream()
+					stopChan = make(chan struct{})
 					go ReadAudioStream(otoCtx, port, stopChan)
 				}
 			}
@@ -158,7 +158,6 @@ func AudioController() {
 			stopStream()
 			break
 		}
-
 	}
 }
 
@@ -166,7 +165,6 @@ func stopStream() {
 	if stopChan != nil {
 		close(stopChan)
 	}
-
 }
 
 func isNumber(s string) bool {
