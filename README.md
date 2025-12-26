@@ -1,4 +1,4 @@
-# go64u
+## go64u
 
 Ultimate64 CLI
 
@@ -15,12 +15,44 @@ Current functions
 * show current vic/bank setup (d011/d016/d018/dd00)
 * navigate through internal storage via ls/cd over ftp connection
 * terminal mode
-* selectable audiostream player
+* selectable audiostream player (works)
 
+Some commands only available in terminal mode
+* cd (change directory)
+* asc (audio stream controller)
+
+### Folder structure with icons
 ![Styled Directory](https://github.com/guidobonerz/go64u/blob/develop/doc/list.png)
+### Audio Stream Player
 ![Styled Directory](https://github.com/guidobonerz/go64u/blob/develop/doc/streamplayer.png)
 
-# Todo's
+## Todo's
 * add streaming client for video
 * list and change dir (local and remote)
 * disassembler with dialect option
+
+## Installation
+Create an environment variable **GO64U_CONFIG** 
+which points to a configuration **yaml** file
+
+The structure of the file is currently as follows
+
+```
+Devices:
+  DEVICE_NAME1:
+    Description: "Device Nme"
+    IsDefault: true
+    IpAddress: <ip of device>
+    VideoPort: 11000
+    AudioPort: 11001
+    DebugPort: 11002
+  DEVICE_NAME2:
+    Description: "Device name"
+    IpAddress: <ip of device>
+    VideoPort: 21000
+    AudioPort: 21001
+    DebugPort: 21002
+DumpFolder: <path to dump folder>
+ScreenshotFolder: <path to screenshot folder>
+```
+
