@@ -141,7 +141,9 @@ func AudioController() {
 		devices = append(devices, Device{Name: deviceName, Index: i})
 		i++
 	}
-	fmt.Println("[q] - quit player")
+	fmt.Println("[R] - start recording audio stream")
+	fmt.Println("[S] - stop recording audio stream")
+	fmt.Println("[Q] - quit player")
 	scanner := bufio.NewScanner(os.Stdin)
 	fmt.Print(": ")
 	for {
@@ -149,24 +151,24 @@ func AudioController() {
 			break
 		}
 		command := scanner.Text()
-
 		if command == "q" {
-
 			fmt.Print("\033[1A\033[0G\033[2K")
 			fmt.Println("exit audio player")
 			stopStream()
+			//stopAudioStream()
 			break
 		}
-
 		fmt.Print("\033[1A\033[0G\033[2K: ")
 		if isNumber(command) {
 			i, _ := strconv.Atoi(command)
 			if i > 0 && i <= len(devices) {
-				port := config.GetConfig().Devices[devices[i-1].Name].AudioPort
+				device := config.GetConfig().Devices[devices[i-1].Name]
+				port := device.AudioPort
 				if lastStreamId != i-1 || len(devices) == 1 {
 					lastStreamId = i - 1
 					stopStream()
 					stopChan = make(chan struct{})
+					startAudioStream(fmt.Sprintf("%s:%d", getOutboundIP().String(), port), device.IpAddress)
 					go ReadAudioStream(otoCtx, port, stopChan)
 				}
 			}
@@ -205,7 +207,7 @@ func stream(name string, command string) {
 	//var url = fmt.Sprintf("streams/%s:%s?ip=%s:%d", name, command, getOutboundIP().String(), port)
 	//network.Execute(url, http.MethodPut, nil)
 
-	//startVideoStream(getOutboundIP().String())
+	//
 	//time.Sleep(time.Second)
 
 }
@@ -374,21 +376,40 @@ func getOutboundIP() net.IP {
 	return localAddr.IP
 }
 
-func startVideoStream(target string) {
-	command := []byte{0xff, 0x20}
+func startVideoStream(source string, target string) {
+	command := []byte{0x20, 0xff}
 	length := []byte{0x00, 0x00}
 	duration := []byte{0x00, 0x00}
-	t := []byte(target)
+	t := []byte(source)
 	length[0] = byte(len(t) + 2)
 	payload := make([]byte, len(t)+6)
 	copy(payload[:], command[:])
-	copy(payload[len(command):], length[:])
-	copy(payload[len(command)+len(length):], duration[:])
-	copy(payload[len(command)+len(length)+len(duration):], t[:])
+	copy(payload[2:], length[:])
+	copy(payload[4:], duration[:])
+	copy(payload[6:], t[:])
 
-	network.SendTcpData(payload)
+	network.SendTcpData(payload, target)
 }
 
-func stopVideoStream() {
-	network.SendTcpData([]byte{0xff, 0x30, 0x00, 0x00})
+func startAudioStream(source string, target string) {
+	command := []byte{0x21, 0xff}
+	length := []byte{0x00, 0x00}
+	duration := []byte{0x00, 0x00}
+	t := []byte(source)
+	length[0] = byte(len(t) + 2)
+	payload := make([]byte, len(t)+6)
+	copy(payload[:], command[:])
+	copy(payload[2:], length[:])
+	copy(payload[4:], duration[:])
+	copy(payload[6:], t[:])
+
+	network.SendTcpData(payload, target)
+}
+
+func stopVideoStream(target string) {
+	network.SendTcpData([]byte{0x30, 0xff, 0x00, 0x00}, target)
+}
+
+func stopAudioStream(target string) {
+	network.SendTcpData([]byte{0x31, 0xff, 0x00, 0x00}, target)
 }

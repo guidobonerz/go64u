@@ -28,6 +28,7 @@ Some commands are only available in terminal mode
 
 ## Todo's
 * add streaming client for video
+* record audio
 * list and change dir (local and remote)
 * disassembler with dialect option
 
