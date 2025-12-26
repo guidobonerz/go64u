@@ -41,6 +41,8 @@ type Device struct {
 }
 
 var stopChan chan struct{}
+var otoCtx *oto.Context
+var audioInitialized = false
 
 func VideoStreamCommand() *cobra.Command {
 	return &cobra.Command{
@@ -113,18 +115,22 @@ func ScreenshotCommand() *cobra.Command {
 }
 
 func AudioController() {
-	op := &oto.NewContextOptions{
-		SampleRate:   48000,
-		ChannelCount: 2,
-		Format:       oto.FormatSignedInt16LE,
-	}
+	if !audioInitialized {
+		op := &oto.NewContextOptions{
+			SampleRate:   48000,
+			ChannelCount: 2,
+			Format:       oto.FormatSignedInt16LE,
+		}
 
-	otoCtx, readyChan, err := oto.NewContext(op)
-	if err != nil {
-		panic(err)
+		var readyChan chan struct{}
+		var err error
+		otoCtx, readyChan, err = oto.NewContext(op)
+		if err != nil {
+			panic(err)
+		}
+		audioInitialized = true
+		<-readyChan
 	}
-	<-readyChan
-
 	devices := []Device{}
 
 	i := 1
@@ -164,6 +170,8 @@ func AudioController() {
 func stopStream() {
 	if stopChan != nil {
 		close(stopChan)
+		stopChan = nil
+
 	}
 }
 
