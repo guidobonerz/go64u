@@ -130,43 +130,43 @@ func AudioController() {
 	i := 1
 	fmt.Println("select stream number to play")
 	for deviceName := range config.GetConfig().Devices {
-		fmt.Printf("[% 2d] - %s <%s>\n", i, config.GetConfig().Devices[deviceName].Description, config.GetConfig().Devices[deviceName].IpAddress)
+		device := config.GetConfig().Devices[deviceName]
+		fmt.Printf("[% 2d] - %s <%s:%s>\n", i, device.Description, device.IpAddress, device.AudioPort)
 		devices = append(devices, Device{Name: deviceName, Index: i})
 		i++
 	}
 	scanner := bufio.NewScanner(os.Stdin)
 	fmt.Print(": ")
 	for {
-
 		if !scanner.Scan() {
 			break
 		}
-
 		command := scanner.Text()
 		fmt.Print("\033[1A\033[0G\033[2K: ")
-
 		if isNumber(command) {
 			i, _ := strconv.Atoi(command)
 			if i > 0 && i <= len(devices) {
 				port := config.GetConfig().Devices[devices[i-1].Name].AudioPort
-
 				if lastStreamId != i-1 {
 					lastStreamId = i - 1
-					if stopChan != nil {
-						close(stopChan)
-					}
 					stopChan = make(chan struct{})
+					stopStream()
 					go ReadAudioStream(otoCtx, port, stopChan)
 				}
-
-			} else {
-				//fmt.Printf("invalid stream number. select a number between 1 and %d\n", len(devices))
 			}
-		} else if command == "quit" {
+		} else if command == "q" {
+			stopStream()
 			break
 		}
 
 	}
+}
+
+func stopStream() {
+	if stopChan != nil {
+		close(stopChan)
+	}
+
 }
 
 func isNumber(s string) bool {
@@ -212,47 +212,35 @@ func ReadAudioStream(otoCtx *oto.Context, port int, stopChan <-chan struct{}) {
 		panic(err)
 	}
 	defer socket.Close()
-
-	//fmt.Printf("Listening on UDP port %d...\n", port)
-
 	pr, pw := io.Pipe()
 	player := otoCtx.NewPlayer(pr)
 	player.SetBufferSize(770 * 4)
 	done := make(chan struct{})
-
 	go func() {
 		defer pw.Close()
 		defer close(done)
-
 		buffer := make([]byte, 770)
-
 		for {
 			select {
 			case <-stopChan:
 				return
 			default:
 			}
-
-			// Set read deadline to allow periodic checking of stopChan
 			socket.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-
 			n, _, err := socket.ReadFromUDP(buffer)
 			if err != nil {
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-					continue // Timeout is normal, just check stopChan again
+					continue
 				}
 				log.Println("UDP read error:", err)
 				break
 			}
-
 			dataToWrite := buffer[2:n]
-
 			writeDone := make(chan error, 1)
 			go func() {
 				_, err := pw.Write(dataToWrite)
 				writeDone <- err
 			}()
-
 			select {
 			case <-stopChan:
 				return
@@ -269,17 +257,12 @@ func ReadAudioStream(otoCtx *oto.Context, port int, stopChan <-chan struct{}) {
 			}
 		}
 	}()
-
 	player.Play()
-
-	// Wait for stop signal or goroutine to finish
 	select {
 	case <-stopChan:
 	case <-done:
 	}
-
-	<-done // Ensure goroutine is fully done
-
+	<-done
 }
 
 func readVideoStream(port int) {
