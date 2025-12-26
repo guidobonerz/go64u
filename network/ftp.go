@@ -12,8 +12,7 @@ import (
 
 func GetFtpConnection(deviceName string) *ftp.ServerConn {
 	device := config.GetConfig().Devices[deviceName]
-	ftpConnection := device.FtpConnection
-	if ftpConnection == nil {
+	if device.FtpConnection == nil {
 		var err error
 		ftpConnection, err := ftp.Dial(fmt.Sprintf("%s:21", device.IpAddress), ftp.DialWithTimeout(5*time.Second))
 		device.FtpConnection = ftpConnection
@@ -25,5 +24,5 @@ func GetFtpConnection(deviceName string) *ftp.ServerConn {
 			log.Fatal(err)
 		}
 	}
-	return ftpConnection
+	return device.FtpConnection
 }

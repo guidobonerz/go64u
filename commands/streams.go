@@ -41,6 +41,8 @@ type Device struct {
 }
 
 var stopChan chan struct{}
+var otoCtx *oto.Context
+var audioInitialized = false
 
 func VideoStreamCommand() *cobra.Command {
 	return &cobra.Command{
@@ -113,28 +115,33 @@ func ScreenshotCommand() *cobra.Command {
 }
 
 func AudioController() {
-	op := &oto.NewContextOptions{
-		SampleRate:   48000,
-		ChannelCount: 2,
-		Format:       oto.FormatSignedInt16LE,
-	}
+	if !audioInitialized {
+		op := &oto.NewContextOptions{
+			SampleRate:   48000,
+			ChannelCount: 2,
+			Format:       oto.FormatSignedInt16LE,
+		}
 
-	otoCtx, readyChan, err := oto.NewContext(op)
-	if err != nil {
-		panic(err)
+		var readyChan chan struct{}
+		var err error
+		otoCtx, readyChan, err = oto.NewContext(op)
+		if err != nil {
+			panic(err)
+		}
+		audioInitialized = true
+		<-readyChan
 	}
-	<-readyChan
-
 	devices := []Device{}
 
 	i := 1
 	fmt.Println("select stream number to play")
 	for deviceName := range config.GetConfig().Devices {
 		device := config.GetConfig().Devices[deviceName]
-		fmt.Printf("[% 2d] - %s <%s:%s>\n", i, device.Description, device.IpAddress, device.AudioPort)
+		fmt.Printf("[%d] - %s <%s:%d>\n", i, device.Description, device.IpAddress, device.AudioPort)
 		devices = append(devices, Device{Name: deviceName, Index: i})
 		i++
 	}
+	fmt.Println("[q] - quit player")
 	scanner := bufio.NewScanner(os.Stdin)
 	fmt.Print(": ")
 	for {
@@ -142,31 +149,38 @@ func AudioController() {
 			break
 		}
 		command := scanner.Text()
+
+		if command == "q" {
+
+			fmt.Print("\033[1A\033[0G\033[2K")
+			fmt.Println("exit audio player")
+			stopStream()
+			break
+		}
+
 		fmt.Print("\033[1A\033[0G\033[2K: ")
 		if isNumber(command) {
 			i, _ := strconv.Atoi(command)
 			if i > 0 && i <= len(devices) {
 				port := config.GetConfig().Devices[devices[i-1].Name].AudioPort
-				if lastStreamId != i-1 {
+				if lastStreamId != i-1 || len(devices) == 1 {
 					lastStreamId = i - 1
-					stopChan = make(chan struct{})
 					stopStream()
+					stopChan = make(chan struct{})
 					go ReadAudioStream(otoCtx, port, stopChan)
 				}
 			}
-		} else if command == "q" {
-			stopStream()
-			break
 		}
-
 	}
+
 }
 
 func stopStream() {
 	if stopChan != nil {
 		close(stopChan)
-	}
+		stopChan = nil
 
+	}
 }
 
 func isNumber(s string) bool {
@@ -221,11 +235,7 @@ func ReadAudioStream(otoCtx *oto.Context, port int, stopChan <-chan struct{}) {
 		defer close(done)
 		buffer := make([]byte, 770)
 		for {
-			select {
-			case <-stopChan:
-				return
-			default:
-			}
+
 			socket.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 			n, _, err := socket.ReadFromUDP(buffer)
 			if err != nil {
