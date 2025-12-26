@@ -1,10 +1,17 @@
-ipaddress: 1.2.3.4
-stream:
-  video:
-    port: 11000
-  audio:
-    port: 11001
-  debug:
-    port: 11002
-dumpFolder: .
-screenshotFolder: .
+Devices:
+  DEVICE_NAME1:
+    Description: "Device Nme"
+    IsDefault: true
+    IpAddress: <ip of device>
+    VideoPort: 11000
+    AudioPort: 11001
+    DebugPort: 11002
+  DEVICE_NAME2:
+    Description: "Device name"
+    IpAddress: <ip of device>
+    VideoPort: 21000
+    AudioPort: 21001
+    DebugPort: 21002
+DumpFolder: <path to dump folder>
+ScreenshotFolder: <path to screenshot folder>
+

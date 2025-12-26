@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bufio"
 	"fmt"
 	"image"
 	"image/png"
@@ -9,7 +10,6 @@ import (
 	"net"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	"drazil.de/go64u/config"
@@ -25,15 +25,22 @@ import (
 
 /*
 protected final static int VIC_STREAM_START_COMMAND = 0xff20;
-
-	protected final static int VIC_STREAM_STOP_COMMAND = 0xff30;
+protected final static int VIC_STREAM_STOP_COMMAND = 0xff30;
 */
 var scaleFactor = 100
 var showAsSixel = false
+var lastStreamId = -1
 
 const WIDTH = 384
 const HEIGHT = 272
 const SIZE = WIDTH * HEIGHT
+
+type Device struct {
+	Name  string
+	Index int
+}
+
+var stopChan chan struct{}
 
 func VideoStreamCommand() *cobra.Command {
 	return &cobra.Command{
@@ -61,23 +68,15 @@ func AudioStreamCommand() *cobra.Command {
 	}
 }
 
-func StreamControllerCommand() *cobra.Command {
+func AudioStreamControllerCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:     "streamcontroller",
-		Short:   "Starts/Stops streams & channels",
-		Long:    "Starts/Stops streams & channels",
+		Use:     "asc",
+		Short:   "controller for audio streams",
+		Long:    "controller for audio streams",
 		GroupID: "stream",
 		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
-			var controlPanel strings.Builder
-			i := 1
-			for deviceName := range config.GetConfig().Devices {
-				controlPanel.WriteString(fmt.Sprintf("[%02d]%s ", i, deviceName))
-				i++
-			}
-			controlPanel.WriteString(" [A]udio [V]ideo [B]oth [Q]uit")
-			fmt.Println(controlPanel.String())
-			//stream("audio", args[0])
+			AudioController()
 		},
 	}
 }
@@ -113,6 +112,68 @@ func ScreenshotCommand() *cobra.Command {
 	return cmd
 }
 
+func AudioController() {
+	op := &oto.NewContextOptions{
+		SampleRate:   48000,
+		ChannelCount: 2,
+		Format:       oto.FormatSignedInt16LE,
+	}
+
+	otoCtx, readyChan, err := oto.NewContext(op)
+	if err != nil {
+		panic(err)
+	}
+	<-readyChan
+
+	devices := []Device{}
+
+	i := 1
+	fmt.Println("select stream number to play")
+	for deviceName := range config.GetConfig().Devices {
+		fmt.Printf("[% 2d] - %s <%s>\n", i, config.GetConfig().Devices[deviceName].Description, config.GetConfig().Devices[deviceName].IpAddress)
+		devices = append(devices, Device{Name: deviceName, Index: i})
+		i++
+	}
+	scanner := bufio.NewScanner(os.Stdin)
+	fmt.Print(": ")
+	for {
+
+		if !scanner.Scan() {
+			break
+		}
+
+		command := scanner.Text()
+		fmt.Print("\033[1A\033[0G\033[2K: ")
+
+		if isNumber(command) {
+			i, _ := strconv.Atoi(command)
+			if i > 0 && i <= len(devices) {
+				port := config.GetConfig().Devices[devices[i-1].Name].AudioPort
+
+				if lastStreamId != i-1 {
+					lastStreamId = i - 1
+					if stopChan != nil {
+						close(stopChan)
+					}
+					stopChan = make(chan struct{})
+					go ReadAudioStream(otoCtx, port, stopChan)
+				}
+
+			} else {
+				//fmt.Printf("invalid stream number. select a number between 1 and %d\n", len(devices))
+			}
+		} else if command == "quit" {
+			break
+		}
+
+	}
+}
+
+func isNumber(s string) bool {
+	_, err := strconv.Atoi(s)
+	return err == nil
+}
+
 func stream(name string, command string) {
 	port := 11000
 	deviceName := "U64I"
@@ -122,7 +183,7 @@ func stream(name string, command string) {
 		readVideoStream(port)
 	case "audio":
 		port = config.GetConfig().Devices[deviceName].AudioPort
-		readAudioStream(port)
+		//ReadAudioStream(port)
 	case "debug":
 		port = config.GetConfig().Devices[deviceName].DebugPort
 	}
@@ -135,24 +196,13 @@ func stream(name string, command string) {
 
 }
 
-func readAudioStream(port int) {
-	op := &oto.NewContextOptions{
-		SampleRate:   48000,
-		ChannelCount: 2,
-		Format:       oto.FormatSignedInt16LE,
-	}
-
-	ctx, readyChan, err := oto.NewContext(op)
-	if err != nil {
-		panic(err)
-	}
-	<-readyChan
-
+func ReadAudioStream(otoCtx *oto.Context, port int, stopChan <-chan struct{}) {
 	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		fmt.Println("Error resolving address:", err)
 		return
 	}
+
 	socket, err := net.ListenUDP("udp", &net.UDPAddr{Port: addr.Port})
 	if err != nil {
 		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
@@ -163,10 +213,11 @@ func readAudioStream(port int) {
 	}
 	defer socket.Close()
 
-	fmt.Printf("Listening on UDP port %d...\n", port)
+	//fmt.Printf("Listening on UDP port %d...\n", port)
 
 	pr, pw := io.Pipe()
-	player := ctx.NewPlayer(pr)
+	player := otoCtx.NewPlayer(pr)
+	player.SetBufferSize(770 * 4)
 	done := make(chan struct{})
 
 	go func() {
@@ -174,20 +225,28 @@ func readAudioStream(port int) {
 		defer close(done)
 
 		buffer := make([]byte, 770)
-		fmt.Print("\033[s")
 
 		for {
+			select {
+			case <-stopChan:
+				return
+			default:
+			}
+
+			// Set read deadline to allow periodic checking of stopChan
+			socket.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+
 			n, _, err := socket.ReadFromUDP(buffer)
 			if err != nil {
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					continue // Timeout is normal, just check stopChan again
+				}
 				log.Println("UDP read error:", err)
 				break
 			}
-			fmt.Print("\033[u\033[K")
-			fmt.Printf(" sequence: %05d\r", util.GetWordFromArray(0, buffer))
 
 			dataToWrite := buffer[2:n]
 
-			// Write with timeout to prevent indefinite blocking
 			writeDone := make(chan error, 1)
 			go func() {
 				_, err := pw.Write(dataToWrite)
@@ -195,6 +254,8 @@ func readAudioStream(port int) {
 			}()
 
 			select {
+			case <-stopChan:
+				return
 			case err := <-writeDone:
 				if err != nil {
 					log.Println("Pipe write error:", err)
@@ -202,15 +263,23 @@ func readAudioStream(port int) {
 				}
 			case <-time.After(100 * time.Millisecond):
 				log.Println("Write timeout - player may be stalled")
-				// Could drop packet or exit here
-				player.Play()
+				if !player.IsPlaying() {
+					log.Println("player stopped. Restart")
+				}
 			}
 		}
 	}()
 
 	player.Play()
 
-	select {}
+	// Wait for stop signal or goroutine to finish
+	select {
+	case <-stopChan:
+	case <-done:
+	}
+
+	<-done // Ensure goroutine is fully done
+
 }
 
 func readVideoStream(port int) {

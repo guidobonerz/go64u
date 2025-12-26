@@ -15,10 +15,12 @@ Current functions
 * show current vic/bank setup (d011/d016/d018/dd00)
 * navigate through internal storage via ls/cd over ftp connection
 * terminal mode
+* selectable audiostream player
 
 ![Styled Directory](https://github.com/guidobonerz/go64u/blob/develop/doc/list.png)
+![Styled Directory](https://github.com/guidobonerz/go64u/blob/develop/doc/streamplayer.png)
 
 # Todo's
-* add streaming client (audio stream for multiple sources in progress)
+* add streaming client for video
 * list and change dir (local and remote)
 * disassembler with dialect option
