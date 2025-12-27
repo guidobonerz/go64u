@@ -1,10 +1,10 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"drazil.de/go64u/config"
+	"drazil.de/go64u/gui"
 	"drazil.de/go64u/setup"
 	"drazil.de/go64u/terminal"
 	"drazil.de/go64u/util"
@@ -26,7 +26,8 @@ var rootCmd = &cobra.Command{
 		}
 
 		if runInGuiMode {
-			fmt.Println("feature not yet implemented")
+			gui.Run()
+
 		}
 	},
 }

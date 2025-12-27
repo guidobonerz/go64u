@@ -23,10 +23,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-/*
-protected final static int VIC_STREAM_START_COMMAND = 0xff20;
-protected final static int VIC_STREAM_STOP_COMMAND = 0xff30;
-*/
 var scaleFactor = 100
 var showAsSixel = false
 var lastStreamId = -1
@@ -34,6 +30,13 @@ var lastStreamId = -1
 const WIDTH = 384
 const HEIGHT = 272
 const SIZE = WIDTH * HEIGHT
+const VIDEO_START = 0xff20
+const AUDIO_START = 0xff21
+const DEBUG_START = 0xff22
+
+const VIDEO_STOP = 0xff30
+const AUDIO_STOP = 0xff31
+const DEBUG_STOP = 0xff32
 
 type Device struct {
 	Name  string
@@ -154,8 +157,9 @@ func AudioController() {
 		if command == "q" {
 			fmt.Print("\033[1A\033[0G\033[2K")
 			fmt.Println("exit audio player")
-			stopStream()
-			//stopAudioStream()
+			lastStreamId = -1
+			stopStreamChannel()
+			//stopStream()
 			break
 		}
 		fmt.Print("\033[1A\033[0G\033[2K: ")
@@ -166,22 +170,20 @@ func AudioController() {
 				port := device.AudioPort
 				if lastStreamId != i-1 || len(devices) == 1 {
 					lastStreamId = i - 1
-					stopStream()
+					stopStreamChannel()
 					stopChan = make(chan struct{})
-					startAudioStream(fmt.Sprintf("%s:%d", getOutboundIP().String(), port), device.IpAddress)
+					startStream(AUDIO_START, fmt.Sprintf("%s:%d", getOutboundIP().String(), port), device.IpAddress)
 					go ReadAudioStream(otoCtx, port, stopChan)
 				}
 			}
 		}
 	}
-
 }
 
-func stopStream() {
+func stopStreamChannel() {
 	if stopChan != nil {
 		close(stopChan)
 		stopChan = nil
-
 	}
 }
 
@@ -191,17 +193,15 @@ func isNumber(s string) bool {
 }
 
 func stream(name string, command string) {
-	port := 11000
-	deviceName := "U64I"
+	deviceName := config.GetConfig().SelectedDevice
+	device := config.GetConfig().Devices[deviceName]
 	switch name {
 	case "video":
-		port = config.GetConfig().Devices[deviceName].VideoPort
-		readVideoStream(port)
+		startStream(AUDIO_START, fmt.Sprintf("%s:%d", getOutboundIP().String(), device.VideoPort), device.IpAddress)
 	case "audio":
-		port = config.GetConfig().Devices[deviceName].AudioPort
-		//ReadAudioStream(port)
+		startStream(AUDIO_START, fmt.Sprintf("%s:%d", getOutboundIP().String(), device.AudioPort), device.IpAddress)
 	case "debug":
-		port = config.GetConfig().Devices[deviceName].DebugPort
+		startStream(AUDIO_START, fmt.Sprintf("%s:%d", getOutboundIP().String(), device.DebugPort), device.IpAddress)
 	}
 
 	//var url = fmt.Sprintf("streams/%s:%s?ip=%s:%d", name, command, getOutboundIP().String(), port)
@@ -376,14 +376,13 @@ func getOutboundIP() net.IP {
 	return localAddr.IP
 }
 
-func startVideoStream(source string, target string) {
-	command := []byte{0x20, 0xff}
+func startStream(command uint16, source string, target string) {
 	length := []byte{0x00, 0x00}
 	duration := []byte{0x00, 0x00}
 	t := []byte(source)
 	length[0] = byte(len(t) + 2)
 	payload := make([]byte, len(t)+6)
-	copy(payload[:], command[:])
+	copy(payload[:], util.GetWordArray(command))
 	copy(payload[2:], length[:])
 	copy(payload[4:], duration[:])
 	copy(payload[6:], t[:])
@@ -391,25 +390,8 @@ func startVideoStream(source string, target string) {
 	network.SendTcpData(payload, target)
 }
 
-func startAudioStream(source string, target string) {
-	command := []byte{0x21, 0xff}
-	length := []byte{0x00, 0x00}
-	duration := []byte{0x00, 0x00}
-	t := []byte(source)
-	length[0] = byte(len(t) + 2)
-	payload := make([]byte, len(t)+6)
-	copy(payload[:], command[:])
-	copy(payload[2:], length[:])
-	copy(payload[4:], duration[:])
-	copy(payload[6:], t[:])
-
+func stopStream(command uint16, target string) {
+	payload := make([]byte, 4)
+	copy(payload[:], util.GetWordArray(command))
 	network.SendTcpData(payload, target)
-}
-
-func stopVideoStream(target string) {
-	network.SendTcpData([]byte{0x30, 0xff, 0x00, 0x00}, target)
-}
-
-func stopAudioStream(target string) {
-	network.SendTcpData([]byte{0x31, 0xff, 0x00, 0x00}, target)
 }
