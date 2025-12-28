@@ -27,6 +27,7 @@ Some commands are only available in terminal mode
 ![Styled Directory](https://github.com/guidobonerz/go64u/blob/develop/doc/streamplayer.png)
 
 ## Todo's
+* add gui frontend (currently available experimental, still buggy)
 * add streaming client for video
 * record audio
 * list and change dir (local and remote)
