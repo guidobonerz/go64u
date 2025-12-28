@@ -23,11 +23,16 @@ Some commands are only available in terminal mode
 
 ### Folder structure with icons
 ![Styled Directory](https://github.com/guidobonerz/go64u/blob/develop/doc/list.png)
-### Audio Stream Player
+### Audio Stream Player - Terminal
 ![Styled Directory](https://github.com/guidobonerz/go64u/blob/develop/doc/streamplayer.png)
+### Audio Stream Player - GUI
+![Styled Directory](https://github.com/guidobonerz/go64u/blob/develop/doc/gui_streamplayer.png.png)
 
+gui_streamplayer.png
 ## Todo's
+* add gui frontend (currently available experimental, still buggy)
 * add streaming client for video
+* record audio
 * list and change dir (local and remote)
 * disassembler with dialect option
 

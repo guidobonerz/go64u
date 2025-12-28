@@ -26,6 +26,7 @@ type Device struct {
 	VideoPort     int             `yaml:"VideoPort"`
 	DebugPort     int             `yaml:"DebugPort"`
 	FtpConnection *ftp.ServerConn `yaml:"-"`
+	AudioChannel  chan struct{}   `yaml:"-"`
 }
 
 func ReadConfig() {

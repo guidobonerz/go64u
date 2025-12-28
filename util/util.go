@@ -192,6 +192,10 @@ func GetWord(address string) int64 {
 	return value
 }
 
+func GetWordArray(address uint16) []byte {
+	return []byte{byte(address & 0xff), byte(address >> 8)}
+}
+
 func GetByte(byte string) int64 {
 	value, _ := strconv.ParseInt(byte, 16, 64)
 	if value < 0 && value > 0xffff {
@@ -201,7 +205,13 @@ func GetByte(byte string) int64 {
 }
 
 func GetWordFromArray(offset int, data []byte) int {
+
 	return int(data[offset+1])<<8 | int(data[offset])
+}
+
+func GetSingedWord(offset int, data []byte) int16 {
+
+	return int16(data[offset+1])<<8 | int16(data[offset])
 }
 
 func GetByteFromArray(offset int, data []byte) int {
