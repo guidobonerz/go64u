@@ -10,7 +10,6 @@ require (
 	github.com/jlaffaye/ftp v0.2.0
 	github.com/mattn/go-sixel v0.0.5
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
-	github.com/richardwilkes/toolbox v1.125.0
 	github.com/richardwilkes/toolbox/v2 v2.8.0
 	github.com/richardwilkes/unison v0.90.5
 	github.com/spf13/cobra v1.10.1

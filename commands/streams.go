@@ -14,6 +14,7 @@ import (
 
 	"drazil.de/go64u/config"
 	"drazil.de/go64u/network"
+	"drazil.de/go64u/renderer"
 	"drazil.de/go64u/util"
 
 	"github.com/ebitengine/oto/v3"
@@ -158,7 +159,7 @@ func AudioController() {
 			fmt.Print("\033[1A\033[0G\033[2K")
 			fmt.Println("exit audio player")
 			lastStreamId = -1
-			stopStreamChannel()
+			StopStreamChannel()
 			//stopStream()
 			break
 		}
@@ -170,17 +171,17 @@ func AudioController() {
 				port := device.AudioPort
 				if lastStreamId != i-1 || len(devices) == 1 {
 					lastStreamId = i - 1
-					stopStreamChannel()
+					StopStreamChannel()
 					stopChan = make(chan struct{})
-					startStream(AUDIO_START, fmt.Sprintf("%s:%d", getOutboundIP().String(), port), device.IpAddress)
-					go ReadAudioStream(otoCtx, port, stopChan)
+					StartStream(AUDIO_START, fmt.Sprintf("%s:%d", GetOutboundIP().String(), port), device.IpAddress)
+					go ReadAudioStream(otoCtx, nil, port, stopChan)
 				}
 			}
 		}
 	}
 }
 
-func stopStreamChannel() {
+func StopStreamChannel() {
 	if stopChan != nil {
 		close(stopChan)
 		stopChan = nil
@@ -197,11 +198,11 @@ func stream(name string, command string) {
 	device := config.GetConfig().Devices[deviceName]
 	switch name {
 	case "video":
-		startStream(AUDIO_START, fmt.Sprintf("%s:%d", getOutboundIP().String(), device.VideoPort), device.IpAddress)
+		StartStream(AUDIO_START, fmt.Sprintf("%s:%d", GetOutboundIP().String(), device.VideoPort), device.IpAddress)
 	case "audio":
-		startStream(AUDIO_START, fmt.Sprintf("%s:%d", getOutboundIP().String(), device.AudioPort), device.IpAddress)
+		StartStream(AUDIO_START, fmt.Sprintf("%s:%d", GetOutboundIP().String(), device.AudioPort), device.IpAddress)
 	case "debug":
-		startStream(AUDIO_START, fmt.Sprintf("%s:%d", getOutboundIP().String(), device.DebugPort), device.IpAddress)
+		StartStream(AUDIO_START, fmt.Sprintf("%s:%d", GetOutboundIP().String(), device.DebugPort), device.IpAddress)
 	}
 
 	//var url = fmt.Sprintf("streams/%s:%s?ip=%s:%d", name, command, getOutboundIP().String(), port)
@@ -212,7 +213,7 @@ func stream(name string, command string) {
 
 }
 
-func ReadAudioStream(otoCtx *oto.Context, port int, stopChan <-chan struct{}) {
+func ReadAudioStream(otoCtx *oto.Context, renderer renderer.UpdateAudioSpectrum, port int, stopChan <-chan struct{}) {
 	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		fmt.Println("Error resolving address:", err)
@@ -250,6 +251,9 @@ func ReadAudioStream(otoCtx *oto.Context, port int, stopChan <-chan struct{}) {
 			dataToWrite := buffer[2:n]
 			writeDone := make(chan error, 1)
 			go func() {
+				if renderer != nil {
+					renderer(dataToWrite)
+				}
 				_, err := pw.Write(dataToWrite)
 				writeDone <- err
 			}()
@@ -366,7 +370,7 @@ func writeImage(data []byte, scaleFactor int) bool {
 	return true
 }
 
-func getOutboundIP() net.IP {
+func GetOutboundIP() net.IP {
 	conn, err := net.Dial("udp", "8.8.8.8:80")
 	if err != nil {
 		log.Fatal(err)
@@ -376,7 +380,7 @@ func getOutboundIP() net.IP {
 	return localAddr.IP
 }
 
-func startStream(command uint16, source string, target string) {
+func StartStream(command uint16, source string, target string) {
 	length := []byte{0x00, 0x00}
 	duration := []byte{0x00, 0x00}
 	t := []byte(source)
@@ -390,7 +394,7 @@ func startStream(command uint16, source string, target string) {
 	network.SendTcpData(payload, target)
 }
 
-func stopStream(command uint16, target string) {
+func StopStream(command uint16, target string) {
 	payload := make([]byte, 4)
 	copy(payload[:], util.GetWordArray(command))
 	network.SendTcpData(payload, target)

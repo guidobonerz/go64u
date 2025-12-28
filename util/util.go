@@ -205,7 +205,13 @@ func GetByte(byte string) int64 {
 }
 
 func GetWordFromArray(offset int, data []byte) int {
+
 	return int(data[offset+1])<<8 | int(data[offset])
+}
+
+func GetSingedWord(offset int, data []byte) int16 {
+
+	return int16(data[offset+1])<<8 | int16(data[offset])
 }
 
 func GetByteFromArray(offset int, data []byte) int {
