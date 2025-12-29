@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"drazil.de/go64u/config"
@@ -19,15 +20,21 @@ var rootCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 
 		runInGuiMode, _ := cmd.Flags().GetBool("gui")
+		runInTerminalMode, _ := cmd.Flags().GetBool("terminal")
 
-		if len(args) == 0 && !runInGuiMode {
+		if len(args) == 0 && !runInGuiMode && !runInTerminalMode {
 			cmd.Help()
 			return
+		}
+		if runInGuiMode && runInTerminalMode {
+			fmt.Println("you have to decide between gui and terminal mode")
+			os.Exit(0)
 		}
 
 		if runInGuiMode {
 			gui.Run()
-
+		} else if runInTerminalMode {
+			terminal.Run()
 		}
 	},
 }
@@ -38,7 +45,8 @@ func main() {
 	setup.Setup(rootCmd, false)
 
 	rootCmd.Flags().Bool("gui", false, "run the application in GUI(Graphics User Interface) mode")
-	rootCmd.AddGroup(&cobra.Group{ID: "terminal", Title: util.YellowText("Terminal Commands")})
+	rootCmd.Flags().Bool("terminal", false, "run the application in terminal mode")
+	//rootCmd.Flags().Bool("device", false, "run the application in terminal mode")
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -47,5 +55,4 @@ func main() {
 }
 
 func init() {
-	rootCmd.AddCommand(terminal.TerminalCommand())
 }

@@ -109,8 +109,12 @@ func ScreenshotCommand() *cobra.Command {
 		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
 			showAsSixel, _ = cmd.Flags().GetBool("sixel")
+			deviceName := config.GetConfig().SelectedDevice
+			device := config.GetConfig().Devices[deviceName]
 			stream("video", "start")
-			//stopVideoStream()
+			ReadVideoStream(device.VideoPort)
+			//stream("video", "stop")
+			fmt.Printf("screenshot taken from device: %s", deviceName)
 		},
 	}
 	cmd.Flags().IntVarP(&scaleFactor, "scale", "s", 100, "scale factor in percent(%)")
@@ -145,8 +149,8 @@ func AudioController() {
 		devices = append(devices, Device{Name: deviceName, Index: i})
 		i++
 	}
-	fmt.Println("[R] - start recording audio stream")
-	fmt.Println("[S] - stop recording audio stream")
+	fmt.Println("[R] - start recording audio stream (not yet implemented)")
+	fmt.Println("[S] - stop recording audio stream (not yet implemented)")
 	fmt.Println("[Q] - quit player")
 	scanner := bufio.NewScanner(os.Stdin)
 	fmt.Print(": ")
@@ -196,21 +200,32 @@ func isNumber(s string) bool {
 func stream(name string, command string) {
 	deviceName := config.GetConfig().SelectedDevice
 	device := config.GetConfig().Devices[deviceName]
-	switch name {
-	case "video":
-		StartStream(AUDIO_START, fmt.Sprintf("%s:%d", GetOutboundIP().String(), device.VideoPort), device.IpAddress)
-	case "audio":
-		StartStream(AUDIO_START, fmt.Sprintf("%s:%d", GetOutboundIP().String(), device.AudioPort), device.IpAddress)
-	case "debug":
-		StartStream(AUDIO_START, fmt.Sprintf("%s:%d", GetOutboundIP().String(), device.DebugPort), device.IpAddress)
+	switch command {
+	case "start":
+		{
+			switch name {
+			case "video":
+				StartStream(VIDEO_START, fmt.Sprintf("%s:%d", GetOutboundIP().String(), device.VideoPort), device.IpAddress)
+			case "audio":
+				StartStream(AUDIO_START, fmt.Sprintf("%s:%d", GetOutboundIP().String(), device.AudioPort), device.IpAddress)
+			case "debug":
+				StartStream(DEBUG_START, fmt.Sprintf("%s:%d", GetOutboundIP().String(), device.DebugPort), device.IpAddress)
+			}
+		}
+	case "stop":
+		{
+			switch name {
+			case "video":
+				StopStream(VIDEO_STOP, device.IpAddress)
+			case "audio":
+				StopStream(AUDIO_STOP, device.IpAddress)
+			case "debug":
+				StopStream(DEBUG_STOP, device.IpAddress)
+			}
+		}
 	}
-
 	//var url = fmt.Sprintf("streams/%s:%s?ip=%s:%d", name, command, getOutboundIP().String(), port)
 	//network.Execute(url, http.MethodPut, nil)
-
-	//
-	//time.Sleep(time.Second)
-
 }
 
 func ReadAudioStream(otoCtx *oto.Context, renderer renderer.UpdateAudioSpectrum, port int, stopChan <-chan struct{}) {
@@ -281,7 +296,7 @@ func ReadAudioStream(otoCtx *oto.Context, renderer renderer.UpdateAudioSpectrum,
 	<-done
 }
 
-func readVideoStream(port int) {
+func ReadVideoStream(port int) {
 
 	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", port))
 	if err != nil {
