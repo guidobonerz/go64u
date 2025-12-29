@@ -40,10 +40,28 @@ type DrawingPanel struct {
 	data           []byte
 }
 
-var images map[string]*DrawingPanel
-var imagesMu sync.RWMutex
+type SafeMap struct {
+	sync.RWMutex
+	images map[string]*DrawingPanel
+}
+
+var synchronizer sync.RWMutex
 var otoCtx *oto.Context
 var fd unison.FontFaceDescriptor
+
+var safeMap SafeMap
+
+func (sm *SafeMap) set(name string, dp *DrawingPanel) {
+	sm.Lock()
+	defer sm.Unlock()
+	sm.images[name] = dp
+}
+
+func (sm *SafeMap) get(name string) *DrawingPanel {
+	sm.RLock()
+	defer sm.RUnlock()
+	return sm.images[name]
+}
 
 func Run() {
 	unison.Start(unison.StartupFinishedCallback(func() {
@@ -53,7 +71,8 @@ func Run() {
 }
 
 func build(where geom.Point) (*unison.Window, error) {
-	images = make(map[string]*DrawingPanel)
+	safeMap.images = make(map[string]*DrawingPanel)
+
 	op := &oto.NewContextOptions{
 		SampleRate:   48000,
 		ChannelCount: 2,
@@ -180,22 +199,22 @@ func createControllerPanel(deviceName string, device *config.Device) *unison.Pan
 		VSpacing:     unison.StdVSpacing,
 	})
 	imagePanel := NewDrawingPanel(deviceName)
-	imagesMu.Lock()
-	images[deviceName] = imagePanel
-	imagesMu.Unlock()
+
+	safeMap.set(deviceName, imagePanel)
+
 	buttonPanel := createToggleSVGButton(unison.MustSVGFromContentString(playIcon), unison.MustSVGFromContentString(stopIcon), deviceName, func(deviceName string) {
 		device := config.GetConfig().Devices[deviceName]
 		device.AudioChannel = make(chan struct{})
 		commands.StartStream(commands.AUDIO_START, fmt.Sprintf("%s:%d", commands.GetOutboundIP().String(), device.AudioPort), device.IpAddress)
 		go commands.ReadAudioStream(otoCtx, func(data []byte) {
-			imagesMu.RLock()
-			panel := images[deviceName]
-			imagesMu.RUnlock()
+			synchronizer.Lock()
+			panel := safeMap.get(deviceName)
 			if panel != nil {
 				panel.data = data
 				panel.MarkForRedraw()
 			}
-			images[deviceName].MarkForRedraw()
+			defer synchronizer.Unlock()
+
 		}, device.AudioPort, device.AudioChannel)
 		fmt.Printf("stream on %s started\n", deviceName)
 	}, func(deviceName string) {
@@ -241,9 +260,7 @@ func (p *DrawingPanel) draw(gc *unison.Canvas, rect geom.Rect) {
 	paint.SetColor(unison.ARGB(1, 255, 255, 255))
 	paint.SetStyle(paintstyle.Fill)
 
-	imagesMu.RLock()
-	data := images[p.dataSourceName].data
-	imagesMu.RUnlock()
+	data := safeMap.get(p.dataSourceName).data
 
 	if data != nil {
 		var x float32 = 0
