@@ -15,7 +15,7 @@ Current functions
 * show current vic/bank setup (d011/d016/d018/dd00)
 * navigate through internal storage via ls/cd over ftp connection
 * terminal mode
-* selectable audiostream player (works)
+* selectable audiostream player
 
 Some commands are only available in terminal mode
 * cd (change directory)
@@ -28,7 +28,6 @@ Some commands are only available in terminal mode
 ### Audio Stream Player - GUI
 ![Styled Directory](https://github.com/guidobonerz/go64u/blob/develop/doc/gui_streamplayer.png)
 
-gui_streamplayer.png
 ## Todo's
 * add gui frontend (currently available experimental, still buggy)
 * add streaming client for video
@@ -60,4 +59,14 @@ Devices:
 DumpFolder: <path to dump folder>
 ScreenshotFolder: <path to screenshot folder>
 ```
+
+## How to start
+### Option1 - Terminal Mode
+
+go64u --terminal
+
+### Option2 - GUI Mode
+
+go64u --gui
+
 
