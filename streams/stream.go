@@ -24,8 +24,6 @@ const VIDEO_STOP = 0xff30
 const AUDIO_STOP = 0xff31
 const DEBUG_STOP = 0xff32
 
-var scaleFactor = 100
-
 func ReadAudioStream(otoCtx *oto.Context, renderer renderer.UpdateAudioSpectrum, port int, stopChan <-chan struct{}) {
 	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", port))
 	if err != nil {
@@ -119,7 +117,6 @@ func ReadVideoStream(port int, renderer Renderer) {
 	capture := false
 	imageData := make([]byte, imaging.SIZE/2)
 	for socket != nil && running {
-
 		_, _, err := socket.ReadFromUDP(dataBuffer)
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {

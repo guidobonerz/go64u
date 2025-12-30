@@ -64,6 +64,19 @@ func AudioStreamControllerCommand() *cobra.Command {
 	}
 }
 
+func TwitchControllerCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:     "twitch",
+		Short:   "controller for audio streams",
+		Long:    "controller for audio streams",
+		GroupID: "stream",
+		Args:    cobra.ExactArgs(0),
+		Run: func(cmd *cobra.Command, args []string) {
+			TwitchController()
+		},
+	}
+}
+
 func DebugStreamCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "debug [command]",
@@ -93,6 +106,7 @@ func ScreenshotCommand() *cobra.Command {
 			renderer := &streams.ImageRenderer{
 				ScaleFactor: scaleFactor,
 				ImageFormat: imaging.JPG,
+				Quality:     90,
 			}
 			streams.ReadVideoStream(device.VideoPort, renderer)
 			//stream("video", "stop")
@@ -101,6 +115,19 @@ func ScreenshotCommand() *cobra.Command {
 	}
 	cmd.Flags().Int("scale", 100, "scale factor in percent(%)")
 	return cmd
+}
+
+func TwitchController() {
+
+	device := config.GetConfig().Devices["U64II"]
+	stream("video", "start")
+	renderer := &streams.TwitchRenderer{
+		ScaleFactor: 100,
+		Fps:         30,
+	}
+	streams.ReadVideoStream(device.VideoPort, renderer)
+	renderer.Run()
+
 }
 
 func AudioController() {
