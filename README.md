@@ -43,22 +43,18 @@ The structure of the file is currently as follows
 
 ```
 Devices:
-  DEVICE_NAME1:
+  DEVICE_NAME[n]:
     Description: "Device name"
     IsDefault: true
     IpAddress: <ip of device>
     VideoPort: 11000
     AudioPort: 11001
     DebugPort: 11002
-  DEVICE_NAME2:
-    Description: "Device name"
-    IpAddress: <ip of device>
-    VideoPort: 21000
-    AudioPort: 21001
-    DebugPort: 21002
 DumpFolder: <path to dump folder>
 ScreenshotFolder: <path to screenshot folder>
 ```
+NOTE: If you have more than one Ultimate64 board, you have to choose different ports for each board
+
 
 ## How to start
 
