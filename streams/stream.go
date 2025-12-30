@@ -94,8 +94,7 @@ func ReadAudioStream(otoCtx *oto.Context, renderer renderer.UpdateAudioSpectrum,
 	<-done
 }
 
-func ReadVideoStream(port int) {
-
+func ReadVideoStream(port int, renderer Renderer) {
 	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		fmt.Println("Error resolving address:", err)
@@ -135,7 +134,8 @@ func ReadVideoStream(port int) {
 
 			if count == 68 {
 				capture = false
-				if imaging.WriteImage(imageData, scaleFactor, false) {
+
+				if renderer.Render(imageData) {
 					running = false
 				}
 				count = 0

@@ -16,6 +16,7 @@ type Config struct {
 	ScreenshotFolder string             `yaml:"ScreenshotFolder"`
 	DumpFolder       string             `yaml:"DumpFolder"`
 	SelectedDevice   string             `yaml:"SelectedDevice"`
+	TwitchStreamKey  string             `yaml:"TwitchStreamKey"`
 }
 
 type Device struct {

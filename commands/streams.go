@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"drazil.de/go64u/config"
+	"drazil.de/go64u/imaging"
 	"drazil.de/go64u/streams"
 
 	"github.com/ebitengine/oto/v3"
@@ -23,8 +24,6 @@ type Device struct {
 var stopChan chan struct{}
 var otoCtx *oto.Context
 var audioInitialized = false
-var showAsSixel = false
-var scaleFactor = 100
 
 func VideoStreamCommand() *cobra.Command {
 	return &cobra.Command{
@@ -80,23 +79,27 @@ func DebugStreamCommand() *cobra.Command {
 
 func ScreenshotCommand() *cobra.Command {
 	var cmd = &cobra.Command{
-		Use:     "screenshot [format]",
-		Short:   "Makes a screenshot of the current screen",
-		Long:    "Makes a screenshot of the current screen",
+		Use:     "screenshot",
+		Short:   "Takes a screenshot of the current screen",
+		Long:    "Takes a screenshot of the current screen",
 		GroupID: "vic",
 		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
-			showAsSixel, _ = cmd.Flags().GetBool("sixel")
+
+			scaleFactor, _ := cmd.Flags().GetInt("scale")
 			deviceName := config.GetConfig().SelectedDevice
 			device := config.GetConfig().Devices[deviceName]
 			stream("video", "start")
-			streams.ReadVideoStream(device.VideoPort)
+			renderer := &streams.ImageRenderer{
+				ScaleFactor: scaleFactor,
+				ImageFormat: imaging.JPG,
+			}
+			streams.ReadVideoStream(device.VideoPort, renderer)
 			//stream("video", "stop")
-			fmt.Printf("screenshot taken from device: %s", deviceName)
+			fmt.Printf("screenshot taken from device\n: %s", deviceName)
 		},
 	}
-	cmd.Flags().IntVarP(&scaleFactor, "scale", "s", 100, "scale factor in percent(%)")
-	cmd.Flags().Bool("sixel", false, "show screenshot as sixel graphic in terminal if supported")
+	cmd.Flags().Int("scale", 100, "scale factor in percent(%)")
 	return cmd
 }
 
