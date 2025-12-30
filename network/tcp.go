@@ -2,6 +2,7 @@ package network
 
 import (
 	"fmt"
+	"log"
 	"net"
 )
 
@@ -12,4 +13,21 @@ func SendTcpData(payload []byte, target string) {
 	}
 	defer conn.Close()
 	conn.Write([]byte(payload))
+}
+
+func GetOutboundIP() net.IP {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer conn.Close()
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+	return localAddr.IP
+}
+
+func IsMulticast(ip net.IP) bool {
+	if ip.To4() != nil {
+		return ip.IsMulticast()
+	}
+	return ip.IsMulticast()
 }
