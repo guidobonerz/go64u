@@ -61,11 +61,16 @@ ScreenshotFolder: <path to screenshot folder>
 ```
 
 ## How to start
+
 ### Option1 - Terminal Mode
+
+go64u <command>
+
+### Option2 - Terminal Mode(REPL)
 
 go64u --terminal
 
-### Option2 - GUI Mode
+### Option3 - GUI Mode
 
 go64u --gui
 
