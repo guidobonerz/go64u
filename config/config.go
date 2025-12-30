@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"log"
 	"os"
 
@@ -15,6 +16,7 @@ type Config struct {
 	Devices          map[string]*Device `yaml:"Devices"`
 	ScreenshotFolder string             `yaml:"ScreenshotFolder"`
 	DumpFolder       string             `yaml:"DumpFolder"`
+	RecordingFolder  string             `yaml:"RecordingFolder"`
 	SelectedDevice   string             `yaml:"SelectedDevice"`
 	TwitchStreamKey  string             `yaml:"TwitchStreamKey"`
 }
@@ -31,20 +33,20 @@ type Device struct {
 }
 
 func ReadConfig() {
-
-	data, err := os.ReadFile(".\\.go64u.yaml")
+	configFileName := ".go64u.yaml"
+	data, err := os.ReadFile(fmt.Sprintf(".\\%s", configFileName))
 	if err != nil {
 		//log.Println("No config file found in application folder.")
 	}
 	if data == nil {
-		configFile := os.Getenv("GO64U_CONFIG")
+		configFile := fmt.Sprintf("%s%s", os.Getenv("GO64U_CONFIG_PATH"), configFileName)
 		if configFile != "" {
 			data, err = os.ReadFile(configFile)
 			if err != nil {
 				//log.Println("No config file found in application folder.")
 			}
 		} else {
-			log.Fatal("Environment variable GO64U_CONFIG not set.")
+			log.Fatal("Environment variable GO64U_CONFIG_PATH not set.")
 		}
 	}
 	if data != nil {
