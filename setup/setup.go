@@ -28,7 +28,7 @@ func Setup(cmd *cobra.Command, skipTerminal bool) {
 	cmd.AddCommand(commands.RebootCommand())
 	cmd.AddCommand(commands.ResetCommand())
 	cmd.AddCommand(commands.ResumeCommand())
-	//cmd.AddCommand(commands.ToggleMenuCommand())
+	cmd.AddCommand(commands.ToggleMenuCommand())
 	cmd.AddCommand(commands.LoadCommand())
 	cmd.AddCommand(commands.RunCommand())
 	cmd.AddCommand(commands.CrtCommand())

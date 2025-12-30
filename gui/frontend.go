@@ -2,11 +2,11 @@ package gui
 
 import (
 	"fmt"
-	"os"
 	"sync"
 
-	"drazil.de/go64u/commands"
 	"drazil.de/go64u/config"
+	"drazil.de/go64u/fonts"
+	"drazil.de/go64u/streams"
 	"drazil.de/go64u/util"
 
 	"github.com/ebitengine/oto/v3"
@@ -40,33 +40,12 @@ type DrawingPanel struct {
 	data           []byte
 }
 
-/*
-	type SafeMap struct {
-		sync.RWMutex
-		images map[string]*DrawingPanel
-	}
-*/
 var images map[string]*DrawingPanel
 
 var synchronizer sync.RWMutex
 var otoCtx *oto.Context
 var fd unison.FontFaceDescriptor
 
-/*
-var safeMap SafeMap
-
-	func (sm *SafeMap) set(name string, dp *DrawingPanel) {
-		sm.Lock()
-		defer sm.Unlock()
-		sm.images[name] = dp
-	}
-
-	func (sm *SafeMap) get(name string) *DrawingPanel {
-		sm.RLock()
-		defer sm.RUnlock()
-		return sm.images[name]
-	}
-*/
 func Run() {
 	unison.Start(unison.StartupFinishedCallback(func() {
 		_, err := build(unison.PrimaryDisplay().Usable.Point)
@@ -75,7 +54,7 @@ func Run() {
 }
 
 func build(where geom.Point) (*unison.Window, error) {
-	//safeMap.images = make(map[string]*DrawingPanel)
+
 	images = make(map[string]*DrawingPanel)
 
 	op := &oto.NewContextOptions{
@@ -97,12 +76,13 @@ func build(where geom.Point) (*unison.Window, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	fontData, err := os.ReadFile("./C64_Pro_Mono-STYLE.ttf")
-	if err != nil {
-		panic(err)
-	}
-	customFontDescriptor, err := unison.RegisterFont(fontData)
+	/*
+		fontData, err := os.ReadFile("./C64_Pro_Mono-STYLE.ttf")
+		if err != nil {
+			panic(err)
+		}
+	*/
+	customFontDescriptor, err := unison.RegisterFont(fonts.C64ProMonoSTYLE)
 	if err != nil {
 		panic(err)
 	}
@@ -181,7 +161,6 @@ func createToggleSVGButton(state1 *unison.SVG, state2 *unison.SVG, deviceName st
 		panel.MarkForRedraw()
 		return true
 	}
-
 	return panel
 }
 
@@ -192,7 +171,6 @@ func addSeparator(parent *unison.Panel) {
 		VAlign: align.Middle,
 	})
 	parent.AddChild(sep)
-
 }
 
 func createControllerPanel(deviceName string, device *config.Device) *unison.Panel {
@@ -204,24 +182,19 @@ func createControllerPanel(deviceName string, device *config.Device) *unison.Pan
 		VSpacing:     unison.StdVSpacing,
 	})
 	imagePanel := NewDrawingPanel(deviceName)
-
-	//safeMap.set(deviceName, imagePanel)
 	images[deviceName] = imagePanel
-
 	buttonPanel := createToggleSVGButton(unison.MustSVGFromContentString(playIcon), unison.MustSVGFromContentString(stopIcon), deviceName, func(deviceName string) {
 		device := config.GetConfig().Devices[deviceName]
 		device.AudioChannel = make(chan struct{})
-		commands.StartStream(commands.AUDIO_START, fmt.Sprintf("%s:%d", commands.GetOutboundIP().String(), device.AudioPort), device.IpAddress)
-		go commands.ReadAudioStream(otoCtx, func(data []byte) {
+		streams.AudioStart(device)
+		go streams.ReadAudioStream(otoCtx, func(data []byte) {
 			synchronizer.Lock()
-			//panel := safeMap.get(deviceName)
 			panel := images[deviceName]
 			if panel != nil {
 				panel.data = data
 				panel.MarkForRedraw()
 			}
 			defer synchronizer.Unlock()
-
 		}, device.AudioPort, device.AudioChannel)
 		fmt.Printf("stream on %s started\n", deviceName)
 	}, func(deviceName string) {
@@ -263,11 +236,8 @@ func (p *DrawingPanel) draw(gc *unison.Canvas, rect geom.Rect) {
 	paint.SetColor(unison.ARGB(1, 55, 55, 55))
 	paint.SetStyle(paintstyle.Fill)
 	gc.DrawRect(rect, paint)
-
 	paint.SetColor(unison.ARGB(1, 255, 255, 255))
 	paint.SetStyle(paintstyle.Fill)
-
-	//data := safeMap.get(p.dataSourceName).data
 	data := images[p.dataSourceName].data
 
 	if data != nil {
