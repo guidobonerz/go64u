@@ -8,7 +8,7 @@ const (
 )
 
 type Renderer interface {
-	Init()
+	Run()
 	GetRunMode() RunMode
 	Render(data []byte) bool
 }

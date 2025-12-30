@@ -30,7 +30,8 @@ Some commands are only available in terminal mode
 
 ## Todo's
 * add gui frontend (currently available experimental, still buggy)
-* add streaming client for video
+* twitch stream
+* add streaming client for video (monitor mode)
 * record audio
 * list and change dir (local and remote)
 * disassembler with dialect option

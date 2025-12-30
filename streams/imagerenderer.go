@@ -9,11 +9,8 @@ type ImageRenderer struct {
 	ImageFormat imaging.ImageFormat
 	Quality     int
 }
-type SixelRenderer struct{}
 
-func (d *ImageRenderer) Init() {
-	d.ImageFormat = imaging.JPG
-	d.Quality = 90
+func (d *ImageRenderer) Run() {
 
 }
 
