@@ -17,7 +17,7 @@ import (
 	"drazil.de/go64u/imaging"
 )
 
-type TwitchRenderer struct {
+type TwitchRendererConfig struct {
 	Fps         int
 	ScaleFactor int
 }
@@ -33,7 +33,7 @@ type StreamConfig struct {
 	StreamKey string
 }
 
-func (d *TwitchRenderer) Run() {
+func (d *TwitchRendererConfig) Run() {
 
 	conf := StreamConfig{
 		Width:     1920,
@@ -141,7 +141,7 @@ func StreamGeneratedImages(ctx context.Context, config StreamConfig) error {
 	}
 }
 
-func (d *TwitchRenderer) Render(data []byte) bool {
+func (d *TwitchRendererConfig) Render(data []byte) bool {
 	synchronizer.Lock()
 	img = imaging.GetImageFromBytes(data, 100)
 	fmt.Printf("length is:%d", len(data))
@@ -149,6 +149,6 @@ func (d *TwitchRenderer) Render(data []byte) bool {
 	return true
 }
 
-func (d *TwitchRenderer) GetRunMode() RunMode {
+func (d *TwitchRendererConfig) GetRunMode() RunMode {
 	return Loop
 }

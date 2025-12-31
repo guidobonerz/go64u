@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"log"
+	"net"
 	"os"
 
 	"github.com/jlaffaye/ftp"
@@ -22,14 +23,16 @@ type Config struct {
 }
 
 type Device struct {
-	Description   string          `yaml:"Description"`
-	IsDefault     bool            `yaml:"IsDefault"`
-	IpAddress     string          `yaml:"IpAddress"`
-	AudioPort     int             `yaml:"AudioPort"`
-	VideoPort     int             `yaml:"VideoPort"`
-	DebugPort     int             `yaml:"DebugPort"`
-	FtpConnection *ftp.ServerConn `yaml:"-"`
-	AudioChannel  chan struct{}   `yaml:"-"`
+	Description        string          `yaml:"Description"`
+	IsDefault          bool            `yaml:"IsDefault"`
+	IpAddress          string          `yaml:"IpAddress"`
+	AudioPort          int             `yaml:"AudioPort"`
+	VideoPort          int             `yaml:"VideoPort"`
+	DebugPort          int             `yaml:"DebugPort"`
+	FtpConnection      *ftp.ServerConn `yaml:"-"`
+	AudioUdpConnection *net.UDPConn    `yaml:"-"`
+	VideoUdpConnection *net.UDPConn    `yaml:"-"`
+	AudioChannel       chan struct{}   `yaml:"-"`
 }
 
 func ReadConfig() {

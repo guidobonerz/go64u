@@ -103,12 +103,17 @@ func ScreenshotCommand() *cobra.Command {
 			deviceName := config.GetConfig().SelectedDevice
 			device := config.GetConfig().Devices[deviceName]
 			stream("video", "start")
-			renderer := &streams.ImageRenderer{
+			rendererConfig := &streams.ImageRendererConfig{
 				ScaleFactor: scaleFactor,
 				ImageFormat: imaging.JPG,
 				Quality:     90,
 			}
-			streams.ReadVideoStream(device.VideoPort, renderer)
+			videoReader := &streams.VideoReader{
+				Device:         device,
+				RendererConfig: *rendererConfig,
+			}
+			videoReader.Read()
+
 			//stream("video", "stop")
 			fmt.Printf("screenshot taken from device\n: %s", deviceName)
 		},
@@ -118,15 +123,20 @@ func ScreenshotCommand() *cobra.Command {
 }
 
 func TwitchController() {
-
 	device := config.GetConfig().Devices["U64II"]
 	stream("video", "start")
-	renderer := &streams.TwitchRenderer{
-		ScaleFactor: 100,
-		Fps:         30,
+	/*
+		rendererConfig := &streams.TwitchRendererConfig{
+			ScaleFactor: 100,
+			Fps:         30,
+		}
+	*/
+	videoReader := &streams.VideoReader{
+		Device: device,
+		//RendererConfig: *rendererConfig,
 	}
-	streams.ReadVideoStream(device.VideoPort, renderer)
-	renderer.Run()
+	videoReader.Read()
+	//renderer.Run()
 
 }
 
@@ -180,13 +190,18 @@ func AudioController() {
 			i, _ := strconv.Atoi(command)
 			if i > 0 && i <= len(devices) {
 				device := config.GetConfig().Devices[devices[i-1].Name]
-				port := device.AudioPort
 				if lastStreamId != i-1 || len(devices) == 1 {
 					lastStreamId = i - 1
 					StopStreamChannel()
 					stopChan = make(chan struct{})
 					streams.AudioStart(device)
-					go streams.ReadAudioStream(otoCtx, nil, port, stopChan)
+					audioReader := streams.AudioReader{
+						Device:       device,
+						AudioContext: otoCtx,
+						StopChan:     device.AudioChannel,
+						Renderer:     nil,
+					}
+					go audioReader.Read()
 				}
 			}
 		}
