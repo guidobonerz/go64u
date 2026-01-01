@@ -20,6 +20,7 @@ Current functions
 Some commands are only available in terminal mode
 * cd (change directory)
 * asc (audio stream controller)
+* stream (stream to your favourite platform, usually needs a streaming key)
 
 ### Folder structure with icons
 ![Styled Directory](https://github.com/guidobonerz/go64u/blob/develop/doc/list.png)
