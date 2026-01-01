@@ -187,15 +187,21 @@ func createControllerPanel(deviceName string, device *config.Device) *unison.Pan
 		device := config.GetConfig().Devices[deviceName]
 		device.AudioChannel = make(chan struct{})
 		streams.AudioStart(device)
-		go streams.ReadAudioStream(otoCtx, func(data []byte) {
-			synchronizer.Lock()
-			panel := images[deviceName]
-			if panel != nil {
-				panel.data = data
-				panel.MarkForRedraw()
-			}
-			defer synchronizer.Unlock()
-		}, device.AudioPort, device.AudioChannel)
+		audioReader := streams.AudioReader{
+			Device:       device,
+			AudioContext: otoCtx,
+			StopChan:     device.AudioChannel,
+			Renderer: func(data []byte) {
+				synchronizer.Lock()
+				panel := images[deviceName]
+				if panel != nil {
+					panel.data = data
+					panel.MarkForRedraw()
+				}
+				defer synchronizer.Unlock()
+			},
+		}
+		go audioReader.Read()
 		fmt.Printf("stream on %s started\n", deviceName)
 	}, func(deviceName string) {
 		device := config.GetConfig().Devices[deviceName]

@@ -5,13 +5,10 @@ import (
 )
 
 type ImageRenderer struct {
+	Renderer
 	ScaleFactor int
 	ImageFormat imaging.ImageFormat
 	Quality     int
-}
-
-func (d *ImageRenderer) Run() {
-
 }
 
 func (d *ImageRenderer) Render(data []byte) bool {

@@ -18,6 +18,7 @@ require (
 )
 
 require (
+	github.com/aws/aws-sdk-go v1.38.20 // indirect
 	github.com/ebitengine/purego v0.9.0 // indirect
 	github.com/go-gl/gl v0.0.0-20231021071112-07e5d0ea2e71 // indirect
 	github.com/go-gl/glfw/v3.3/glfw v0.0.0-20250301202403-da16c1255728 // indirect
@@ -25,10 +26,12 @@ require (
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/kr/text v0.2.0 // indirect
-	github.com/nareix/joy4 v0.0.0-20200507095837-05a4ffbb5369 // indirect
 	github.com/soniakeys/quant v1.0.0 // indirect
+	github.com/u2takey/ffmpeg-go v0.5.0 // indirect
+	github.com/u2takey/go-utils v0.3.1 // indirect
 	github.com/yuin/goldmark v1.7.13 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
 	golang.org/x/image v0.34.0 // indirect

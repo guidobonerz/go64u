@@ -51,11 +51,16 @@ Devices:
     VideoPort: 11000
     AudioPort: 11001
     DebugPort: 11002
+StreamingTargets:
+  twitch: rtmp://live.twitch.tv/app/<stream_key>
+  OTHER: rtmp://
+LogLevel: ffmpeg_loglevel
 DumpFolder: <path to dump folder>
 ScreenshotFolder: <path to screenshot folder>
 ```
 NOTE: If you have more than one Ultimate64 board, you have to choose different ports for each board
 
+NOTE: If you want to stream the u64 stream via rtmp to twitch, youtube, etc. you need to install ffmpeg
 
 ## How to start
 

@@ -1,3 +1,4 @@
+LogLevel: ffmpeg_loglevel
 Devices:
   DEVICE_NAME1:
     Description: "Device Nme"
@@ -12,6 +13,11 @@ Devices:
     VideoPort: 21000
     AudioPort: 21001
     DebugPort: 21002
+StreamingTargets:
+  twitch: rtmp://live.twitch.tv/app/<stream_key>
+  OTHER: rtmp://
 DumpFolder: <path to dump folder>
 ScreenshotFolder: <path to screenshot folder>
+
+
 
