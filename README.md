@@ -78,5 +78,5 @@ go64u --gui
 
 ## How to stream to twitch or other platforms
 start go64u in terminal mode : .\go64u.exe --terminal
-then type **stream platform_name**
+then type **stream target_name** e.g. **stream twitch**
 

@@ -19,18 +19,18 @@ var outputtype string
 
 func ActiveDeviceCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:     "device",
-		Short:   "Sets the active device regarding config name",
-		Long:    "Sets the active device regarding config name.",
+		Use:     "device [device_key]",
+		Short:   "Sets the active device or show current device if key is empty",
+		Long:    "Sets the active device or show current device if key is empty",
 		GroupID: "machine",
-		Args:    cobra.ExactArgs(1),
+		Args:    cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			if config.GetConfig().Devices[args[0]] == nil {
-				fmt.Print(util.RedText(fmt.Sprintf("unknown device: %s\n", args[0])))
-			} else {
+			if len(args) == 1 {
 				config.GetConfig().SelectedDevice = args[0]
-				fmt.Printf("current device is: %s\n", args[0])
 			}
+			deviceName := config.GetConfig().SelectedDevice
+			device := config.GetConfig().Devices[deviceName]
+			showDevice(deviceName, *device)
 		},
 	}
 }
@@ -43,18 +43,25 @@ func ShowDevicesCommand() *cobra.Command {
 		GroupID: "machine",
 		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
-
-			for deviceName, device := range config.GetConfig().Devices {
-				fmt.Printf("Device Name: %s\n", deviceName)
-				fmt.Printf("  Description: %s\n", device.Description)
-				fmt.Printf("  IP Address: %s\n", device.IpAddress)
-				fmt.Printf("  Video Port: %d\n", device.VideoPort)
-				fmt.Printf("  Audio Port: %d\n", device.AudioPort)
-				fmt.Printf("  Debug Port: %d\n", device.DebugPort)
-				fmt.Printf("  Is Default: %v\n", device.IsDefault)
-				fmt.Println("----------------------------")
-			}
+			showDevices()
 		},
+	}
+}
+
+func showDevice(deviceName string, device config.Device) {
+	fmt.Printf("Device Name: %s\n", deviceName)
+	fmt.Printf("Description: %s\n", device.Description)
+	fmt.Printf("IP Address : %s\n", device.IpAddress)
+	fmt.Printf("Video Port : %d\n", device.VideoPort)
+	fmt.Printf("Audio Port : %d\n", device.AudioPort)
+	fmt.Printf("Debug Port : %d\n", device.DebugPort)
+	fmt.Printf("Is Default : %v\n", device.IsDefault)
+}
+
+func showDevices() {
+	for deviceName, device := range config.GetConfig().Devices {
+		showDevice(deviceName, *device)
+		fmt.Println("----------------------------")
 	}
 }
 
@@ -75,7 +82,7 @@ func RebootCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "reboot",
 		Short:   "Reboots the U64",
-		Long:    "This command restarts the machine./nIt re-initializes the cartridge configuration and sends a reset to the machine.",
+		Long:    "This command restarts the machine.\nIt re-initializes the cartridge configuration and sends a reset to the machine.",
 		GroupID: "machine",
 		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
