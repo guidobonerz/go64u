@@ -21,7 +21,6 @@ var rootCmd = &cobra.Command{
 
 		runInGuiMode, _ := cmd.Flags().GetBool("gui")
 		runInTerminalMode, _ := cmd.Flags().GetBool("terminal")
-
 		if len(args) == 0 && !runInGuiMode && !runInTerminalMode {
 			cmd.Help()
 			return
@@ -46,12 +45,10 @@ func main() {
 
 	rootCmd.Flags().Bool("gui", false, "run the application in GUI(Graphics User Interface) mode")
 	rootCmd.Flags().Bool("terminal", false, "run the application in terminal mode")
-	//rootCmd.Flags().Bool("device", false, "run the application in terminal mode")
-
+	rootCmd.PersistentFlags().StringVarP(&config.GetConfig().SelectedDevice, "device", "d", config.GetConfig().SelectedDevice, "set device. needed in non terminal mode")
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
-
 }
 
 func init() {

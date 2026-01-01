@@ -35,6 +35,7 @@ func Run() {
 	replCmd.AddCommand(commands.RemoteCdCommand())
 	replCmd.AddCommand(commands.AudioStreamControllerCommand())
 	replCmd.AddCommand(commands.StreamCommand())
+	replCmd.AddCommand(commands.ActiveDeviceCommand())
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
 		fmt.Printf("%s%s: ", util.White, commands.CurrentPath)

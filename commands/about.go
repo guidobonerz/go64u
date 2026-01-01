@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 
+	"drazil.de/go64u/config"
 	"drazil.de/go64u/network"
 
 	"github.com/spf13/cobra"
@@ -47,13 +48,15 @@ func DeviceInfoCommand() *cobra.Command {
 			if err != nil {
 				log.Fatalf("Error parsing config file: %v", err)
 			}
+
 			fmt.Print("\n** Device Information **\n\n")
-			fmt.Printf("Product         : %s\n", deviceInfo.Product)
-			fmt.Printf("Firmware Version: %s\n", deviceInfo.FirmwareVersion)
-			fmt.Printf("FPGA Version    : %s\n", deviceInfo.FPGAVersion)
-			fmt.Printf("Core Version    : %s\n", deviceInfo.CoreVersion)
-			fmt.Printf("Hostname        : %s\n", deviceInfo.Hostname)
-			fmt.Printf("Unique ID       : %s\n", deviceInfo.UniqueID)
+			fmt.Printf("Device Config Key: %s\n", config.GetConfig().SelectedDevice)
+			fmt.Printf("Product          : %s\n", deviceInfo.Product)
+			fmt.Printf("Firmware Version : %s\n", deviceInfo.FirmwareVersion)
+			fmt.Printf("FPGA Version     : %s\n", deviceInfo.FPGAVersion)
+			fmt.Printf("Core Version     : %s\n", deviceInfo.CoreVersion)
+			fmt.Printf("Hostname         : %s\n", deviceInfo.Hostname)
+			fmt.Printf("Unique ID        : %s\n", deviceInfo.UniqueID)
 		},
 	}
 }
