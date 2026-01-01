@@ -1,14 +1,17 @@
 package streams
 
+import "context"
+
 type RunMode int
 
 const (
-	Loop RunMode = 0
+	Loop RunMode = iota
 	OneShot
 )
 
 type Renderer interface {
-	Run()
+	Init() error
 	GetRunMode() RunMode
 	Render(data []byte) bool
+	GetContext() context.Context
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"drazil.de/go64u/config"
 	"drazil.de/go64u/imaging"
@@ -64,15 +65,15 @@ func AudioStreamControllerCommand() *cobra.Command {
 	}
 }
 
-func TwitchControllerCommand() *cobra.Command {
+func StreamCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:     "twitch",
-		Short:   "controller for audio streams",
-		Long:    "controller for audio streams",
+		Use:     "stream [target]",
+		Short:   "stream to your favourite streaming platform e.g twitch/youtube",
+		Long:    "stream to your favourite streaming platform e.g twitch/youtube",
 		GroupID: "stream",
-		Args:    cobra.ExactArgs(0),
+		Args:    cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			TwitchController()
+			StreamController(args[0])
 		},
 	}
 }
@@ -98,23 +99,21 @@ func ScreenshotCommand() *cobra.Command {
 		GroupID: "vic",
 		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
-
 			scaleFactor, _ := cmd.Flags().GetInt("scale")
 			deviceName := config.GetConfig().SelectedDevice
 			device := config.GetConfig().Devices[deviceName]
 			stream("video", "start")
-			rendererConfig := &streams.ImageRendererConfig{
+			renderer := &streams.ImageRenderer{
 				ScaleFactor: scaleFactor,
 				ImageFormat: imaging.JPG,
 				Quality:     90,
 			}
 			videoReader := &streams.VideoReader{
-				Device:         device,
-				RendererConfig: *rendererConfig,
+				Device:   device,
+				Renderer: renderer,
 			}
 			videoReader.Read()
-
-			//stream("video", "stop")
+			stream("video", "stop")
 			fmt.Printf("screenshot taken from device\n: %s", deviceName)
 		},
 	}
@@ -122,22 +121,22 @@ func ScreenshotCommand() *cobra.Command {
 	return cmd
 }
 
-func TwitchController() {
-	device := config.GetConfig().Devices["U64II"]
+func StreamController(streamPlatformName string) {
+	device := config.GetConfig().Devices[config.GetConfig().SelectedDevice]
 	stream("video", "start")
-	/*
-		rendererConfig := &streams.TwitchRendererConfig{
-			ScaleFactor: 100,
-			Fps:         30,
-		}
-	*/
-	videoReader := &streams.VideoReader{
-		Device: device,
-		//RendererConfig: *rendererConfig,
-	}
-	videoReader.Read()
-	//renderer.Run()
 
+	renderer := &streams.StreamRenderer{
+		ScaleFactor: 100,
+		Fps:         30,
+		Url:         config.GetConfig().StreamingTargets[strings.ToLower(streamPlatformName)],
+		LogLevel:    config.GetConfig().LogLevel,
+	}
+	videoReader := &streams.VideoReader{
+		Device:   device,
+		Renderer: renderer,
+	}
+	videoReader.Init()
+	videoReader.Read()
 }
 
 func AudioController() {

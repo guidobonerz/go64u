@@ -19,7 +19,8 @@ type Config struct {
 	DumpFolder       string             `yaml:"DumpFolder"`
 	RecordingFolder  string             `yaml:"RecordingFolder"`
 	SelectedDevice   string             `yaml:"SelectedDevice"`
-	TwitchStreamKey  string             `yaml:"TwitchStreamKey"`
+	StreamingTargets map[string]string  `yaml:"StreamingTargets"`
+	LogLevel         string             `yaml:"LogLevel"`
 }
 
 type Device struct {
@@ -33,6 +34,10 @@ type Device struct {
 	AudioUdpConnection *net.UDPConn    `yaml:"-"`
 	VideoUdpConnection *net.UDPConn    `yaml:"-"`
 	AudioChannel       chan struct{}   `yaml:"-"`
+}
+
+type StreamingPlatform struct {
+	RtmpUrl string `yaml:"RtmpUrl"`
 }
 
 func ReadConfig() {
