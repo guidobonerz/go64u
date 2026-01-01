@@ -38,8 +38,7 @@ Some commands are only available in terminal mode
 * disassembler with dialect option
 
 ## Installation
-Create an environment variable **GO64U_CONFIG** 
-which points to a configuration **yaml** file
+Create an environment variable **GO64U_CONFIG_PATH** where the **.go64u.yaml** file is located
 
 The structure of the file is currently as follows
 
@@ -53,8 +52,8 @@ Devices:
     AudioPort: 11001
     DebugPort: 11002
 StreamingTargets:
-  twitch: rtmp://live.twitch.tv/app/<stream_key>
-  OTHER: rtmp://
+  <name of the streaming platform, e.g. twitch>: rtmp://live.twitch.tv/app/<stream_key>
+  <second platform...>: rtmp://
 LogLevel: ffmpeg_loglevel
 DumpFolder: <path to dump folder>
 ScreenshotFolder: <path to screenshot folder>
@@ -77,4 +76,7 @@ go64u --terminal
 
 go64u --gui
 
+## How to stream to twitch or other platforms
+start go64u in terminal mode : .\go64u.exe --terminal
+then type **stream platform_name**
 
