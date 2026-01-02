@@ -12,7 +12,7 @@
             //"program": "${fileDirname}",
             "program": "main.go",
             "args": [
-                "--gui"
+                "--a64"
             ]
         }
     ]
