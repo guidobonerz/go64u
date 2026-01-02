@@ -21,6 +21,7 @@ type Config struct {
 	SelectedDevice   string             `yaml:"SelectedDevice"`
 	StreamingTargets map[string]string  `yaml:"StreamingTargets"`
 	LogLevel         string             `yaml:"LogLevel"`
+	ResourceUrl      string             `yaml:"ResoureUrl"`
 }
 
 type Device struct {
@@ -34,10 +35,6 @@ type Device struct {
 	AudioUdpConnection *net.UDPConn    `yaml:"-"`
 	VideoUdpConnection *net.UDPConn    `yaml:"-"`
 	AudioChannel       chan struct{}   `yaml:"-"`
-}
-
-type StreamingPlatform struct {
-	RtmpUrl string `yaml:"RtmpUrl"`
 }
 
 func ReadConfig() {

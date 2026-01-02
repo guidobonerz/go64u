@@ -10,6 +10,7 @@ import (
 	"drazil.de/go64u/config"
 	"drazil.de/go64u/imaging"
 	"drazil.de/go64u/streams"
+	"drazil.de/go64u/util"
 
 	"github.com/ebitengine/oto/v3"
 	"github.com/spf13/cobra"
@@ -185,7 +186,7 @@ func AudioController() {
 			break
 		}
 		fmt.Print("\033[1A\033[0G\033[2K: ")
-		if isNumber(command) {
+		if util.IsNumber(command) {
 			i, _ := strconv.Atoi(command)
 			if i > 0 && i <= len(devices) {
 				device := config.GetConfig().Devices[devices[i-1].Name]
@@ -212,11 +213,6 @@ func StopStreamChannel() {
 		close(stopChan)
 		stopChan = nil
 	}
-}
-
-func isNumber(s string) bool {
-	_, err := strconv.Atoi(s)
-	return err == nil
 }
 
 func stream(name string, command string) {

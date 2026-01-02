@@ -22,7 +22,6 @@ var CurrentPath string = ""
 var lastPath string = ""
 
 var extensionIcon = map[string]string{
-
 	"dir":     "\U0001F4C1",
 	"prg":     "\U0001F4FA",
 	"d64":     "\U0001F4BE",
@@ -35,6 +34,70 @@ var re = regexp.MustCompile(`\.(\w+)$`)
 var insideDiskimage = false
 var entry *ftp.Entry
 var mountedDiskImage []byte
+
+func CopyCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "copy [from] [to]",
+		Short:   "copy files from local maschine to internal storage and vice versa",
+		Long:    "copy files from local maschine to internal storage and vice versa",
+		GroupID: "file",
+		Args:    cobra.ExactArgs(2),
+		Run: func(cmd *cobra.Command, args []string) {
+
+			var c = network.GetFtpConnection(config.GetConfig().SelectedDevice)
+
+			path := CurrentPath
+			if len(args) > 0 {
+				path = args[0]
+			}
+			entries, err := c.List(path)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			for _, entry := range entries {
+				f, _ := cmd.Flags().GetString("filter")
+				if filter(entry.Name, f) {
+					if entry.Type == ftp.EntryTypeFolder {
+						fmt.Printf("%s %s%s\n", extensionIcon["dir"], util.Green, entry.Name)
+					} else {
+						var address = ""
+						suffix := getSuffix(entry)
+						showStart, _ := cmd.Flags().GetBool("memaddress")
+						if showStart {
+							address = "|----"
+							var err error
+							var r *ftp.Response
+							if suffix == "prg" {
+
+								r, err = c.Retr(fmt.Sprintf("%s/%s", path, entry.Name))
+								if err != nil {
+									log.Printf("Error: %v\n", err)
+									continue
+								}
+								var content [2]byte
+								io.ReadFull(r, content[:])
+								r.Close()
+								address = fmt.Sprintf("|%04x", util.GetWordFromArray(0, content[:]))
+
+							}
+
+						}
+						icon := extensionIcon[suffix]
+						if icon == "" {
+							icon = extensionIcon["default"]
+						}
+						valueParts := strings.Fields(humanize.Bytes(entry.Size))
+						fmt.Printf("%s %s%-6s%s|%s%s\n", icon, util.Gray, fmt.Sprintf("%6s %-3s", valueParts[0], valueParts[1]), address, util.Blue, entry.Name)
+					}
+				}
+			}
+
+		},
+	}
+
+	return cmd
+}
 
 func RemoteFindCommand() *cobra.Command {
 	cmd := &cobra.Command{
