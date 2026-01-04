@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/url"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,14 +18,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
-type Category struct {
-	Id           int    `json:"id"`
-	Name         string `json:"name"`
-	Type         string `json:"type"`
-	Description  string `json:"description"`
-	GroupingName string `json:"groupingName"`
-}
-
+/*
+	type Category struct {
+		Id           int    `json:"id"`
+		Name         string `json:"name"`
+		Type         string `json:"type"`
+		Description  string `json:"description"`
+		GroupingName string `json:"groupingName"`
+	}
+*/
 type Preset struct {
 	Type        string  `json:"type"`
 	Description string  `json:"description"`
@@ -32,8 +34,9 @@ type Preset struct {
 }
 
 type Value struct {
-	AqlKey string `json:"aqlKey"`
-	Name   string `json:"name"`
+	AqlKey   string `json:"aqlKey"`
+	Name     string `json:"name"`
+	Selected bool   `json:"-"`
 }
 
 type CompoType struct {
@@ -54,21 +57,22 @@ type Entry struct {
 	Updated      string `json:"updated"`
 }
 
-var categories []Category
+// var categories []Category
 var presets []Preset
 var compoTypes []CompoType
 var entries []Entry
 
-var selectedCategory = -1
+var reFlag = regexp.MustCompile(`--(\w+)`)
+var reParam = regexp.MustCompile(`(\w+)`)
 
 func Cache() {
 	result := network.Get(fmt.Sprintf("%s/categories", config.GetConfig().ResourceUrl))
-
-	json.Unmarshal(result, &categories)
-	sort.Slice(categories, func(i, j int) bool {
-		return categories[i].Id < categories[j].Id
-	})
-
+	/*
+		json.Unmarshal(result, &categories)
+		sort.Slice(categories, func(i, j int) bool {
+			return categories[i].Id < categories[j].Id
+		})
+	*/
 	result = network.Get(fmt.Sprintf("%s/aql/presets", config.GetConfig().ResourceUrl))
 	json.Unmarshal(result, &presets)
 	result = network.Get(fmt.Sprintf("%s/compotypes", config.GetConfig().ResourceUrl))
@@ -82,9 +86,10 @@ func Run() {
 	fmt.Println("Welcome to the go64u database(a64) mode! Type 'quit' to exit.")
 	replCmd := &cobra.Command{}
 	replCmd.CompletionOptions.DisableDefaultCmd = true
-	replCmd.AddCommand(quitCommand())
 	replCmd.AddCommand(categoriesCommand())
+	replCmd.AddCommand(filterCommand())
 	replCmd.AddCommand(listCommand())
+	replCmd.AddCommand(quitCommand())
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
 		fmt.Printf("%s: ", util.White)
@@ -117,6 +122,59 @@ func prompt() {
 	fmt.Print("select category id (q=quit or r=reset selection): ")
 }
 
+func filterCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "filter",
+		Short: "filter",
+		Run: func(cmd *cobra.Command, args []string) {
+			scanner := bufio.NewReader(os.Stdin)
+			for {
+				/*
+					if !scanner.Scan() {
+						break
+					}
+				*/
+				command, _, _ := scanner.ReadLine()
+				group := findLastFlag(string(command))
+				fmt.Println(group)
+				autocomplete(string(command), findGroupValues(group))
+			}
+		},
+	}
+	return cmd
+}
+func findLastFlag(command string) string {
+
+	parts := reFlag.FindAllStringSubmatch(command, 30)
+	if parts == nil {
+		return ""
+	}
+	lastGroup := parts[len(parts)-1]
+	return lastGroup[len(lastGroup)-1]
+}
+func findGroupValues(groupName string) []Value {
+	for _, p := range presets {
+		if p.Type == groupName {
+			return p.Values
+		}
+	}
+	return nil
+}
+
+func autocomplete(command string, values []Value) {
+	parts := reParam.FindAllString(command, 30)
+	if parts == nil {
+		return
+	}
+	lastValue := parts[len(parts)-1]
+	for _, v := range values {
+		if strings.HasPrefix(v.Name, lastValue) {
+			fmt.Println("autocomplete match")
+		}
+	}
+
+}
+
 func listCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
@@ -126,8 +184,9 @@ func listCommand() *cobra.Command {
 			offset := 0
 			limit := 30
 			var query strings.Builder
-			if selectedCategory > -1 {
-				query.WriteString(fmt.Sprintf("(%s:\"%s\")", "category", categories[selectedCategory].Name))
+			value := getSelectedPreset("category")
+			if nil != value {
+				query.WriteString(fmt.Sprintf("(%s:\"%s\")", "category", value.Name))
 			}
 			scanner := bufio.NewScanner(os.Stdin)
 			for {
@@ -175,15 +234,16 @@ func categoriesCommand() *cobra.Command {
 		Short: "show categories",
 		Run: func(cmd *cobra.Command, args []string) {
 
-			for i, category := range categories {
-				selected := util.Reset
-				if i == selectedCategory {
-					selected = util.Green
-				}
-				fmt.Printf("%s[%02d] - %s%s\n", selected, category.Id, category.Name, util.Reset)
-			}
-			scanner := bufio.NewScanner(os.Stdin)
 			for {
+				for i, category := range getPresetsByKey("category") {
+					highlight := util.Reset
+					if category.Selected {
+						highlight = util.Yellow
+					}
+					fmt.Printf("%s[%02d] - %s%s\n", highlight, i, category.Name, util.Reset)
+				}
+				scanner := bufio.NewScanner(os.Stdin)
+
 				prompt()
 				if !scanner.Scan() {
 					break
@@ -193,40 +253,61 @@ func categoriesCommand() *cobra.Command {
 					break
 				}
 				if command == "r" {
-					selectedCategory = -1
+					getSelectedPreset("category").Selected = false
 					break
 				}
 				if util.IsNumber(command) {
 					id, _ := strconv.Atoi(command)
 					var err error
-					selectedCategory, err = getCategory(id)
+					var name string
+					name, err = setSelectedPreset("category", id)
 					if err != nil {
 						fmt.Println(err)
 					} else {
-						fmt.Printf("selected category: %s\n", categories[selectedCategory].Name)
-						break
+						fmt.Printf("selected category: %s\n", name)
+						//break
 					}
 				} else {
 					fmt.Println("not a number")
 				}
+				fmt.Printf("\033[%02dA\r", len(getPresetsByKey("category"))+2)
 			}
 		},
 	}
 }
 
-func getCategory(id int) (int, error) {
-	ci := -1
-	found := false
-	for i, c := range categories {
-		if c.Id == id {
-			ci = i
-			found = true
-			break
+func getPresetsByKey(key string) []Value {
+	for i := range presets {
+		if presets[i].Type == key {
+			return presets[i].Values
 		}
 	}
-	if !found {
-		return -1, fmt.Errorf("unkown category id: %d", id)
-	}
+	return nil
+}
 
-	return ci, nil
+func getSelectedPreset(key string) *Value {
+	values := getPresetsByKey(key)
+	for i := range values {
+		if values[i].Selected {
+			return &values[i]
+		}
+	}
+	return nil
+}
+
+func setSelectedPreset(key string, id int) (string, error) {
+	for i := range presets {
+		if presets[i].Type == key {
+			if id >= len(presets[i].Values) {
+				return "", fmt.Errorf("unknown %s id: %d", key, id)
+			}
+
+			for j := range presets[i].Values {
+				presets[i].Values[j].Selected = (j == id)
+			}
+
+			return presets[i].Values[id].Name, nil
+		}
+	}
+	return "", fmt.Errorf("unknown preset type: %s", key)
 }

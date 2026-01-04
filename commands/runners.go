@@ -22,7 +22,7 @@ func LoadCommand() *cobra.Command {
 			network.Execute("runners:load_prg", http.MethodPost, data)
 		},
 	}
-	cmd.Flags().BoolP("detectstart", "d", false, "detect start address if address is not given")
+	//cmd.Flags().BoolP("detectstart", "d", false, "detect start address if address is not given")
 	return cmd
 }
 
@@ -39,7 +39,7 @@ func RunCommand() *cobra.Command {
 			network.Execute("runners:run_prg", http.MethodPost, data)
 		},
 	}
-	cmd.Flags().BoolP("detectstart", "d", false, "detect start address if address is not given")
+	//cmd.Flags().BoolP("detectstart", "d", false, "detect start address if address is not given")
 	return cmd
 }
 

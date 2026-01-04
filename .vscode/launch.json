@@ -10,9 +10,10 @@
             "request": "launch",
             "mode": "auto",
             //"program": "${fileDirname}",
+             "console": "externalTerminal",
             "program": "main.go",
             "args": [
-                "--a64"
+                "run","frogs.prg"
             ]
         }
     ]

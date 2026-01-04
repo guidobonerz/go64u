@@ -55,8 +55,7 @@ var rootCmd = &cobra.Command{
 }
 
 func main() {
-	config.ReadConfig()
-	database.Cache()
+
 	setup.Setup(rootCmd, false)
 	rootCmd.Flags().Bool("gui", false, "run the application in GUI(Graphics User Interface) mode")
 	rootCmd.Flags().Bool("terminal", false, "run the application in terminal mode")
@@ -68,5 +67,6 @@ func main() {
 }
 
 func init() {
+	config.ReadConfig()
 	database.Cache()
 }
