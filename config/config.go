@@ -18,10 +18,10 @@ type Config struct {
 	ScreenshotFolder string             `yaml:"ScreenshotFolder"`
 	DumpFolder       string             `yaml:"DumpFolder"`
 	RecordingFolder  string             `yaml:"RecordingFolder"`
-	SelectedDevice   string             `yaml:"SelectedDevice"`
+	SelectedDevice   string             `yaml:"-"`
 	StreamingTargets map[string]string  `yaml:"StreamingTargets"`
 	LogLevel         string             `yaml:"LogLevel"`
-	ResourceUrl      string             `yaml:"ResoureUrl"`
+	ResourceUrl      string             `yaml:"ResourceUrl"`
 }
 
 type Device struct {
