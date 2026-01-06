@@ -73,7 +73,10 @@ func ResetCommand() *cobra.Command {
 		GroupID: "machine",
 		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
-			network.Execute("machine:reset", http.MethodPut, nil)
+			network.SendHttpRequest(&network.HttpConfig{
+				URL:    network.GetUrl("machine:reset"),
+				Method: http.MethodPut,
+			})
 		},
 	}
 }
@@ -86,7 +89,10 @@ func RebootCommand() *cobra.Command {
 		GroupID: "machine",
 		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
-			network.Execute("machine:reboot", http.MethodPut, nil)
+			network.SendHttpRequest(&network.HttpConfig{
+				URL:    network.GetUrl("machine:reboot"),
+				Method: http.MethodPut,
+			})
 		},
 	}
 }
@@ -99,7 +105,10 @@ func PauseCommand() *cobra.Command {
 		GroupID: "machine",
 		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
-			network.Execute("machine:pause", http.MethodPut, nil)
+			network.SendHttpRequest(&network.HttpConfig{
+				URL:    network.GetUrl("machine:pause"),
+				Method: http.MethodPut,
+			})
 		},
 	}
 }
@@ -112,7 +121,10 @@ func ResumeCommand() *cobra.Command {
 		GroupID: "machine",
 		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
-			network.Execute("machine:resume", http.MethodPut, nil)
+			network.SendHttpRequest(&network.HttpConfig{
+				URL:    network.GetUrl("machine:resume"),
+				Method: http.MethodPut,
+			})
 		},
 	}
 }
@@ -125,7 +137,10 @@ func PowerOffCommand() *cobra.Command {
 		GroupID: "machine",
 		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
-			network.Execute("machine:poweroff", http.MethodPut, nil)
+			network.SendHttpRequest(&network.HttpConfig{
+				URL:    network.GetUrl("machine:poweroff"),
+				Method: http.MethodPut,
+			})
 		},
 	}
 }
@@ -138,7 +153,10 @@ func ToggleMenuCommand() *cobra.Command {
 		GroupID: "machine",
 		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
-			network.Execute("machine:menu_button", http.MethodPut, nil)
+			network.SendHttpRequest(&network.HttpConfig{
+				URL:    network.GetUrl("machine:menu_button"),
+				Method: http.MethodPut,
+			})
 		},
 	}
 }
@@ -154,7 +172,11 @@ func WriteMemoryCommand() *cobra.Command {
 			if len(args[1]) > 2 {
 				panic("only one byte allowed")
 			}
-			network.Execute(fmt.Sprintf("machine:writemem?address=%s", util.GetWordAsString(args[0])), http.MethodPost, []byte{byte(util.GetByte(args[1]))})
+			network.SendHttpRequest(&network.HttpConfig{
+				URL:     network.GetUrl(fmt.Sprintf("machine:writemem?address=%s", util.GetWordAsString(args[0]))),
+				Method:  http.MethodPut,
+				Payload: []byte{byte(util.GetByte(args[1]))},
+			})
 		},
 	}
 	//cmd.Flags().Uint16VarP(&peekLength, "length", "l", 1, "set the length of data to peek, defaults to 1")
@@ -171,6 +193,7 @@ func ReadMemoryCommand() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			//var response []byte = network.Execute(fmt.Sprintf("machine:readmem?address=%s&length=1", helper.GetWordAsString(args[0])), http.MethodGet, nil)
 			b := ReadFromMemory(int(util.GetWord(args[0])), peekLength)
+
 			log.Printf("peeked result:0x%02X", b)
 		},
 	}
@@ -210,11 +233,20 @@ func MessageCommand() *cobra.Command {
 			for i, v := range message {
 				buffer[i] = util.ASCIIToScreenCodeLowercase[v]
 			}
-			network.Execute(fmt.Sprintf("machine:writemem?address=%04x", location), http.MethodPost, buffer)
+			network.SendHttpRequest(&network.HttpConfig{
+				URL:     network.GetUrl(fmt.Sprintf("machine:writemem?address=%04x", location)),
+				Method:  http.MethodPut,
+				Payload: buffer,
+			})
 		},
 	}
 }
 
 func ReadFromMemory(address int, length uint16) byte {
-	return network.Execute(fmt.Sprintf("machine:readmem?address=%04x&length=%d", address, length), http.MethodGet, nil)[0]
+	queryConfig := &network.HttpConfig{
+		URL:    network.GetUrl(fmt.Sprintf("machine:readmem?address=%04x&length=%d", address, length)),
+		Method: http.MethodPut,
+	}
+	return network.SendHttpRequest(queryConfig)[0]
+
 }

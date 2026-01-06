@@ -10,10 +10,10 @@
             "request": "launch",
             "mode": "auto",
             //"program": "${fileDirname}",
-             "console": "externalTerminal",
+             //"console": "externalTerminal",
             "program": "main.go",
             "args": [
-                "run","frogs.prg"
+                "a64download"
             ]
         }
     ]

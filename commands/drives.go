@@ -23,7 +23,11 @@ func MountCommand() *cobra.Command {
 				panic("not a valid drive name, A or B required")
 			}
 			payload, _ := util.ReadFile(args[1])
-			network.Execute(fmt.Sprintf("drives/%s:mount?type=d64&mode=readwrite", args[0]), http.MethodPost, payload)
+			network.SendHttpRequest(&network.HttpConfig{
+				URL:     network.GetUrl(fmt.Sprintf("drives/%s:mount?type=d64&mode=readwrite", args[0])),
+				Method:  http.MethodPost,
+				Payload: payload,
+			})
 		},
 	}
 }
@@ -39,7 +43,10 @@ func UnmountCommand() *cobra.Command {
 			if !isValidDrive(args[0]) {
 				panic("not a valid drive name, A or B required")
 			}
-			network.Execute(fmt.Sprintf("drives/%s:remove?type=d64&mode=readwrite", args[0]), http.MethodPut, nil)
+			network.SendHttpRequest(&network.HttpConfig{
+				URL:    network.GetUrl(fmt.Sprintf("drives/%s:remove?type=d64&mode=readwrite", args[0])),
+				Method: http.MethodPut,
+			})
 		},
 	}
 }

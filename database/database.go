@@ -5,12 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"net/url"
 	"os"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"drazil.de/go64u/config"
 	"drazil.de/go64u/network"
@@ -45,41 +46,160 @@ type CompoType struct {
 	Selected bool   `json:"selected"`
 }
 
-type Entry struct {
+type ContentContainer struct {
+	ContentEntry []File `json:"contentEntry"`
+}
+
+type File struct {
+	Id   int    `json:"id"`
+	Size int    `json:"size"`
+	Path string `json:"path"`
+}
+
+type Package struct {
 	Id           string `json:"id"`
 	Name         string `json:"name"`
 	Category     int    `json:"category"`
-	SiteCategory int    `json:"siteCcategory"`
+	SiteCategory int    `json:"siteCategory"`
 	SiteRanking  int    `json:"siteRanking"`
 	Group        string `json:"group"`
 	Year         int    `json:"year"`
 	Rating       int    `json:"rating"`
 	Updated      string `json:"updated"`
+	Selected     bool   `json:"-"`
 }
 
 // var categories []Category
 var presets []Preset
 var compoTypes []CompoType
-var entries []Entry
+var entries []Package
 
 var reFlag = regexp.MustCompile(`--(\w+)`)
 var reParam = regexp.MustCompile(`(\w+)`)
 
+type Filter struct {
+	Name        string
+	Group       string
+	Handle      string
+	Category    string
+	SubCategory string
+	Repository  string
+	Year        string
+	Rating      string
+	Type        string
+	Latest      string
+}
+
+var contentContainer ContentContainer
+var filter Filter
+var offset int
+var limit int
+var ignoreDefaults bool
+
+func DownloadCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "a64download",
+		Short:   "Downloads packages matching to a filter",
+		Long:    "Downloads packages matching to a filter\nBy default is filter by current year and type=d64",
+		GroupID: "platform",
+		Args:    cobra.ExactArgs(0),
+		Run: func(cmd *cobra.Command, args []string) {
+			var queryFilter string
+			var err error
+			var doQuery = true
+			queryFilter, err = buildFilter(filter)
+			if err != nil {
+				doQuery = false
+			}
+			if doQuery {
+				queryResult(queryFilter)
+				for _, pac := range entries {
+					id, _ := strconv.Atoi(pac.Id)
+					readEntries(id, pac.Category)
+					for _, entry := range contentContainer.ContentEntry {
+						saveEntry(id, pac.Category, entry.Path, filter.Type)
+					}
+					//fmt.Printf("%07s:%05d:%-40s\n", entry.Id, entry.Category, entry.Name)
+				}
+			}
+		},
+	}
+	cmd.Flags().StringVarP(&filter.Name, "name", "", "", "")
+	cmd.Flags().StringVarP(&filter.Group, "group", "", "", "")
+	cmd.Flags().StringVarP(&filter.Handle, "handle", "", "", "")
+	cmd.Flags().StringVarP(&filter.Category, "category", "", "", "")
+	cmd.Flags().StringVarP(&filter.Repository, "repo", "", "", "")
+	cmd.Flags().StringVarP(&filter.SubCategory, "subcat", "", "", "")
+	cmd.Flags().StringVarP(&filter.Year, "year", "", "", "")
+	cmd.Flags().StringVarP(&filter.Rating, "rating", "", "", "")
+	cmd.Flags().StringVarP(&filter.Type, "type", "", "", "")
+	cmd.Flags().StringVarP(&filter.Latest, "latest", "", "", "")
+	cmd.Flags().IntVarP(&offset, "offset", "", 0, "")
+	cmd.Flags().IntVarP(&limit, "limit", "", 40, "")
+	cmd.Flags().BoolVarP(&ignoreDefaults, "ignoreDefaults", "", false, "")
+
+	return cmd
+}
+
 func Cache() {
-	result := network.Get(fmt.Sprintf("%s/categories", config.GetConfig().ResourceUrl))
+	//result := network.HttpGet(fmt.Sprintf("%s/categories", config.GetConfig().ResourceUrl))
 	/*
 		json.Unmarshal(result, &categories)
 		sort.Slice(categories, func(i, j int) bool {
 			return categories[i].Id < categories[j].Id
 		})
 	*/
-	result = network.Get(fmt.Sprintf("%s/aql/presets", config.GetConfig().ResourceUrl))
-	json.Unmarshal(result, &presets)
-	result = network.Get(fmt.Sprintf("%s/compotypes", config.GetConfig().ResourceUrl))
-	json.Unmarshal(result, &compoTypes)
-	sort.Slice(compoTypes, func(i, j int) bool {
-		return compoTypes[i].Id < compoTypes[j].Id
+	/*
+		result := network.SendHttpRequest(&network.HttpConfig{
+			URL:         fmt.Sprintf("%s/aql/presets", config.GetConfig().ResourceUrl),
+			Method:      http.MethodGet,
+			SetClientId: true,
+		})
+		json.Unmarshal(result, &presets)
+
+		result = network.SendHttpRequest(&network.HttpConfig{
+			URL:         fmt.Sprintf("%s/compotypes", config.GetConfig().ResourceUrl),
+			Method:      http.MethodGet,
+			SetClientId: true,
+		})
+		json.Unmarshal(result, &compoTypes)
+		sort.Slice(compoTypes, func(i, j int) bool {
+			return compoTypes[i].Id < compoTypes[j].Id
+		})
+	*/
+}
+
+func readEntries(id int, categoryId int) {
+	result := network.SendHttpRequest(&network.HttpConfig{
+		URL:         fmt.Sprintf("%s/entries/%d/%d", config.GetConfig().ResourceUrl, id, categoryId),
+		Method:      http.MethodGet,
+		SetClientId: true,
 	})
+	json.Unmarshal(result, &contentContainer)
+}
+
+func saveEntry(id int, categoryId int, fileName string, fileType string) {
+	content := network.SendHttpRequest(&network.HttpConfig{
+		URL:         fmt.Sprintf("%s/bin/%d/%d/%s", config.GetConfig().ResourceUrl, id, categoryId, fileName),
+		Method:      http.MethodGet,
+		SetClientId: true,
+	})
+
+	if strings.HasSuffix(fileName, fileType) || fileType == "" {
+		s := fmt.Sprintf("%s%s", config.GetConfig().DownloadFolder, fileName)
+		fmt.Println(s)
+		f, err := os.Create(s)
+		if err != nil {
+			fmt.Println("error creating file")
+		}
+		defer f.Close()
+
+		bytesWritten, err := f.Write(content)
+		if err != nil {
+			fmt.Println("error writing file")
+		}
+		fmt.Printf("wrote %d bytes\n", bytesWritten)
+	}
 }
 
 func Run() {
@@ -174,6 +294,62 @@ func autocomplete(command string, values []Value) {
 	}
 
 }
+func buildFilter(filter Filter) (string, error) {
+	var query strings.Builder
+	if filter.Name != "" {
+		query.WriteString(buildFilterItem("name", filter.Name, true))
+	}
+	if filter.Group != "" {
+		query.WriteString(buildFilterItem("group", filter.Group, true))
+	}
+	if filter.Handle != "" {
+		query.WriteString(buildFilterItem("handle", filter.Handle, true))
+	}
+	if filter.Category != "" {
+		query.WriteString(buildFilterItem("category", filter.Category, false))
+	}
+	if filter.SubCategory != "" {
+		query.WriteString(buildFilterItem("subcat", filter.SubCategory, false))
+	}
+	if filter.Year != "" {
+		query.WriteString(buildFilterItem("date", filter.Year, false))
+	} else {
+		if !ignoreDefaults {
+			query.WriteString(buildFilterItem("date", strconv.Itoa(time.Now().Year()), false))
+		}
+
+	}
+	if filter.Rating != "" {
+		query.WriteString(buildFilterItem("rating", filter.Rating, true))
+	}
+	if filter.Type != "" {
+		query.WriteString(buildFilterItem("type", filter.Type, false))
+	}
+	if filter.Latest != "" {
+		query.WriteString(buildFilterItem("latest", filter.Latest, false))
+	} else {
+		if !ignoreDefaults {
+			query.WriteString(buildFilterItem("latest", "1month", false))
+		}
+	}
+	var err error
+	var queryString = query.String()
+
+	if queryString == "" {
+		err = fmt.Errorf("at least one filter value is needed\n")
+	} else {
+		queryString = queryString[0 : len(queryString)-3]
+	}
+	return queryString, err
+}
+
+func buildFilterItem(name string, value string, quote bool) string {
+	if quote {
+		return fmt.Sprintf("(%s:\"%s\") & ", name, value)
+	} else {
+		return fmt.Sprintf("(%s:%s) & ", name, value)
+	}
+}
 
 func listCommand() *cobra.Command {
 	return &cobra.Command{
@@ -183,20 +359,32 @@ func listCommand() *cobra.Command {
 
 			offset := 0
 			limit := 30
-			var query strings.Builder
+			var query string
+			var err error
+			var doList = true
 			value := getSelectedPreset("category")
 			if nil != value {
-				query.WriteString(fmt.Sprintf("(%s:\"%s\")", "category", value.Name))
+				query, err = buildFilter(Filter{Category: value.AqlKey, Year: "2025"})
+				if err != nil {
+					doList = false
+				}
 			}
 			scanner := bufio.NewScanner(os.Stdin)
-			for {
-				s := fmt.Sprintf("%s/aql/%d/%d?query=%s", config.GetConfig().ResourceUrl, offset, limit, url.PathEscape(query.String()))
-				result := network.Get(s)
-				json.Unmarshal(result, &entries)
-				for i, entry := range entries {
-					fmt.Printf("[%02d] - %-30s - %-20s - Year:%04d - Rating:%02d\n", i, crop(entry.Name, 30), crop(entry.Group, 20), entry.Year, entry.Rating)
+			stopScanning := false
+			doQuery := true
+			for !stopScanning {
+
+				if doQuery && doList {
+					queryResult(query)
 				}
-				fmt.Printf("\n[P]revious page [N]ext page [ESC]: ")
+				for i := range 30 {
+					if i < len(entries) {
+						fmt.Printf("\033[2K\033[97m[%02d] | %-30s | %-20s | %04d|%s\n", i, crop(entries[i].Name, 30), crop(entries[i].Group, 20), entries[i].Year, printRating(entries[i].Rating))
+					} else {
+						fmt.Printf("\033[2K\033[97m[%02d] - empty slot\n", i)
+					}
+				}
+				fmt.Printf("\n\033[2K[P]revious page [N]ext page [S]elect(n) [F]ilter [Q]uit: ")
 				if !scanner.Scan() {
 					break
 				}
@@ -206,21 +394,60 @@ func listCommand() *cobra.Command {
 					{
 						if offset > 0 {
 							offset -= limit
+							doQuery = true
 						}
+						pageUp()
 					}
 				case "n":
 					{
-						offset += limit
+						if len(entries) > 0 && len(entries) == 30 {
+							offset += limit
+							doQuery = true
+						}
+						pageUp()
+					}
+				case "q":
+					{
+						doQuery = false
+						stopScanning = true
+						fmt.Println()
+						break
 					}
 				default:
 					{
+						doQuery = false
+						pageUp()
 					}
 				}
-				fmt.Print("\033[K\033[32A\r")
+
 			}
 		}}
 }
+func queryResult(query string) {
+	result := network.SendHttpRequest(&network.HttpConfig{
+		URL:         fmt.Sprintf("%s/aql/%d/%d?query=%s", config.GetConfig().ResourceUrl, offset, limit, url.QueryEscape(query)),
+		Method:      http.MethodGet,
+		SetClientId: true,
+	})
+	json.Unmarshal(result, &entries)
+}
 
+func printRating(rating int) string {
+	var sb strings.Builder
+	for i := range 10 {
+		if i <= rating && rating > 0 {
+			sb.WriteString("\033[33m★\033[0m")
+
+		} else {
+			sb.WriteString("\033[90m☆\033[0m")
+		}
+	}
+	return sb.String()
+}
+
+func pageUp() {
+	fmt.Print("\033[K\033[32A\r")
+}
 func crop(s string, length int) string {
 	if len([]rune(s)) < length-3 {
 		return s
