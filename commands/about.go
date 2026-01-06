@@ -31,7 +31,11 @@ func VersionCommand() *cobra.Command {
 		GroupID: "platform",
 		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
-			network.Execute("version", http.MethodGet, nil)
+			network.SendHttpRequest(&network.HttpConfig{
+				URL:         network.GetUrl("version"),
+				Method:      http.MethodGet,
+				SetClientId: true,
+			})
 		},
 	}
 }
@@ -43,12 +47,14 @@ func DeviceInfoCommand() *cobra.Command {
 		GroupID: "platform",
 		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
-			info := network.Execute("info", http.MethodGet, nil)
+			info := network.SendHttpRequest(&network.HttpConfig{
+				URL:    network.GetUrl("info"),
+				Method: http.MethodGet,
+			})
 			err := yaml.Unmarshal(info, &deviceInfo)
 			if err != nil {
 				log.Fatalf("Error parsing config file: %v", err)
 			}
-
 			fmt.Print("\n** Device Information **\n\n")
 			fmt.Printf("Device Config Key: %s\n", config.GetConfig().SelectedDevice)
 			fmt.Printf("Product          : %s\n", deviceInfo.Product)

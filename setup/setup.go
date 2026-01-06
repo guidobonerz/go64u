@@ -2,6 +2,7 @@ package setup
 
 import (
 	"drazil.de/go64u/commands"
+	"drazil.de/go64u/database"
 	"drazil.de/go64u/util"
 
 	"github.com/spf13/cobra"
@@ -40,5 +41,6 @@ func Setup(cmd *cobra.Command, skipTerminal bool) {
 	cmd.AddCommand(commands.DeviceInfoCommand())
 	cmd.AddCommand(commands.ScreenControlCommand())
 	cmd.AddCommand(commands.RemoteLsCommand())
+	cmd.AddCommand(database.DownloadCommand())
 
 }

@@ -17,9 +17,13 @@ func LoadCommand() *cobra.Command {
 		GroupID: "runner",
 		Args:    cobra.MaximumNArgs(2),
 		Run: func(cmd *cobra.Command, args []string) {
-
-			data, _ := util.ReadFile(args[0])
-			network.Execute("runners:load_prg", http.MethodPost, data)
+			payload, _ := util.ReadFile(args[0])
+			queryConfig := &network.HttpConfig{
+				URL:     network.GetUrl("runners:load_prg"),
+				Method:  http.MethodPost,
+				Payload: payload,
+			}
+			network.SendHttpRequest(queryConfig)
 		},
 	}
 	//cmd.Flags().BoolP("detectstart", "d", false, "detect start address if address is not given")
@@ -34,9 +38,12 @@ func RunCommand() *cobra.Command {
 		GroupID: "runner",
 		Args:    cobra.MaximumNArgs(2),
 		Run: func(cmd *cobra.Command, args []string) {
-
-			data, _ := util.ReadFile(args[0])
-			network.Execute("runners:run_prg", http.MethodPost, data)
+			payload, _ := util.ReadFile(args[0])
+			network.SendHttpRequest(&network.HttpConfig{
+				URL:     network.GetUrl("runners:run_prg"),
+				Method:  http.MethodPost,
+				Payload: payload,
+			})
 		},
 	}
 	//cmd.Flags().BoolP("detectstart", "d", false, "detect start address if address is not given")
@@ -51,9 +58,12 @@ func CrtCommand() *cobra.Command {
 		GroupID: "runner",
 		Args:    cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-
-			data, _ := util.ReadFile(args[0])
-			network.Execute("runners:run_crt", http.MethodPost, data)
+			payload, _ := util.ReadFile(args[0])
+			network.SendHttpRequest(&network.HttpConfig{
+				URL:     network.GetUrl("runners:run_crt"),
+				Method:  http.MethodPost,
+				Payload: payload,
+			})
 		},
 	}
 }
