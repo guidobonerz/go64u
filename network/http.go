@@ -2,10 +2,12 @@ package network
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"time"
 
 	"drazil.de/go64u/config"
 )
@@ -18,21 +20,32 @@ type HttpConfig struct {
 }
 
 func SendHttpRequest(httpConfig *HttpConfig) []byte {
-	client := &http.Client{}
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+	var request *http.Request
+	var err error
+	request, err = http.NewRequest(httpConfig.Method, httpConfig.URL, bytes.NewBuffer(httpConfig.Payload))
 
-	req, err := http.NewRequest(httpConfig.Method, httpConfig.URL, bytes.NewBuffer(httpConfig.Payload))
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	request = request.WithContext(ctx)
 
 	if httpConfig.SetClientId {
-		req.Header.Set("Client-Id", config.GetConfig().DatabaseClient)
-		req.Header.Set("User-Agent", "Assembly Query")
-	}
-	if err != nil {
-		log.Fatal(err)
+		request.Header.Set("Client-Id", config.GetConfig().DatabaseClient)
+		request.Header.Set("User-Agent", "Assembly Query")
 	}
 
-	resp, err := client.Do(req)
+	resp, err := client.Do(request)
 	if err != nil {
-		log.Fatal(err)
+		if ctx.Err() == context.DeadlineExceeded {
+			fmt.Printf("\"%s\" seems not to be online", config.GetConfig().Devices[config.GetConfig().SelectedDevice].Description)
+			return nil
+		}
+
+		fmt.Printf("Request failed: %v\n", err)
+		return nil
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)

@@ -39,6 +39,10 @@ type Device struct {
 	AudioChannel       chan struct{}   `yaml:"-"`
 }
 
+func GetSelectedDevice() Device {
+	return *config.Devices[config.SelectedDevice]
+}
+
 func ReadConfig() {
 	configFileName := ".go64u.yaml"
 	data, err := os.ReadFile(fmt.Sprintf(".\\%s", configFileName))
