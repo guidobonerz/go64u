@@ -23,8 +23,8 @@ var rootCmd = &cobra.Command{
 		mode := 0
 		runInGuiMode, _ := cmd.Flags().GetBool("gui")
 		runInTerminalMode, _ := cmd.Flags().GetBool("terminal")
-		runInDatabaseMode, _ := cmd.Flags().GetBool("database")
-		if len(args) == 0 && !runInGuiMode && !runInTerminalMode && !runInDatabaseMode {
+
+		if len(args) == 0 && !runInGuiMode && !runInTerminalMode {
 			cmd.Help()
 			return
 		}
@@ -35,11 +35,8 @@ var rootCmd = &cobra.Command{
 		if runInTerminalMode {
 			mode |= 2
 		}
-		if runInDatabaseMode {
-			mode |= 4
-		}
 
-		if mode != 1 && mode != 2 && mode != 4 {
+		if mode != 1 && mode != 2 {
 			fmt.Println("Too much arugemnts. you have to decide select one mode")
 			os.Exit(0)
 		}
@@ -48,8 +45,6 @@ var rootCmd = &cobra.Command{
 			gui.Run()
 		} else if runInTerminalMode {
 			terminal.Run()
-		} else if runInDatabaseMode {
-			database.Run()
 		}
 	},
 }
@@ -59,7 +54,6 @@ func main() {
 	setup.Setup(rootCmd, false)
 	rootCmd.Flags().Bool("gui", false, "run the application in GUI(Graphics User Interface) mode")
 	rootCmd.Flags().Bool("terminal", false, "run the application in terminal mode")
-	rootCmd.Flags().Bool("database", false, "run the application in database mode")
 	rootCmd.PersistentFlags().StringVarP(&config.GetConfig().SelectedDevice, "device", "d", config.GetConfig().SelectedDevice, "set device. needed in non terminal mode")
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

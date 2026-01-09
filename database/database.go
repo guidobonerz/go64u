@@ -118,9 +118,14 @@ func DownloadCommand() *cobra.Command {
 					id, _ := strconv.Atoi(pac.Id)
 					readEntries(id, pac.Category)
 					for _, entry := range contentContainer.ContentEntry {
-						saveEntry(id, pac.Category, entry.Path, filter.Type)
+						if strings.HasSuffix(entry.Path, filter.Type) || filter.Type == "" {
+							if get {
+								saveEntry(id, pac.Category, entry.Path)
+							} else {
+								fmt.Printf("%s:%s\n", pac.Name, entry.Path)
+							}
+						}
 					}
-					//fmt.Printf("%07s:%05d:%-40s\n", entry.Id, entry.Category, entry.Name)
 				}
 			}
 		},
@@ -180,32 +185,25 @@ func readEntries(id int, categoryId int) {
 	json.Unmarshal(result, &contentContainer)
 }
 
-func saveEntry(id int, categoryId int, fileName string, fileType string) {
+func saveEntry(id int, categoryId int, fileName string) {
 	content := network.SendHttpRequest(&network.HttpConfig{
 		URL:         fmt.Sprintf("%s/bin/%d/%d/%s", config.GetConfig().ResourceUrl, id, categoryId, fileName),
 		Method:      http.MethodGet,
 		SetClientId: true,
 	})
-
-	if strings.HasSuffix(fileName, fileType) || fileType == "" {
-		if get {
-			s := fmt.Sprintf("%s%s", config.GetConfig().DownloadFolder, fileName)
-			fmt.Println(s)
-			f, err := os.Create(s)
-			if err != nil {
-				fmt.Println("error creating file")
-			}
-			defer f.Close()
-
-			bytesWritten, err := f.Write(content)
-			if err != nil {
-				fmt.Println("error writing file")
-			}
-			fmt.Printf("wrote %d bytes\n", bytesWritten)
-		} else {
-			fmt.Println(fileName)
-		}
+	s := fmt.Sprintf("%s%s", config.GetConfig().DownloadFolder, fileName)
+	fmt.Println(s)
+	f, err := os.Create(s)
+	if err != nil {
+		fmt.Println("error creating file")
 	}
+	defer f.Close()
+
+	bytesWritten, err := f.Write(content)
+	if err != nil {
+		fmt.Println("error writing file")
+	}
+	fmt.Printf("wrote %d bytes\n", bytesWritten)
 }
 
 func Run() {
