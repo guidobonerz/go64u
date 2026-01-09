@@ -17,7 +17,6 @@ func Setup(cmd *cobra.Command, skipTerminal bool) {
 	cmd.AddGroup(&cobra.Group{ID: "stream", Title: util.YellowText("Stream Commands")})
 	cmd.AddGroup(&cobra.Group{ID: "vic", Title: util.YellowText("VIC Commands")})
 
-	cmd.AddCommand(commands.VersionCommand())
 	cmd.AddCommand(commands.ShowDevicesCommand())
 	cmd.AddCommand(commands.WriteMemoryCommand())
 	cmd.AddCommand(commands.ReadMemoryCommand())

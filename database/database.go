@@ -95,12 +95,13 @@ var filter Filter
 var offset int
 var limit int
 var ignoreDefaults bool
+var get bool
 
 func DownloadCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "a64download",
-		Short:   "Downloads packages matching to a filter",
-		Long:    "Downloads packages matching to a filter\nBy default is filter by current year and type=d64",
+		Use:     "query",
+		Short:   "query packages matching to a filter",
+		Long:    "query packages matching to a filter\nBy default is filter by current year and type=d64",
 		GroupID: "platform",
 		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
@@ -137,6 +138,7 @@ func DownloadCommand() *cobra.Command {
 	cmd.Flags().IntVarP(&offset, "offset", "", 0, "")
 	cmd.Flags().IntVarP(&limit, "limit", "", 40, "")
 	cmd.Flags().BoolVarP(&ignoreDefaults, "ignoreDefaults", "", false, "")
+	cmd.Flags().BoolVarP(&get, "get", "", false, "get the files")
 
 	return cmd
 }
@@ -186,19 +188,23 @@ func saveEntry(id int, categoryId int, fileName string, fileType string) {
 	})
 
 	if strings.HasSuffix(fileName, fileType) || fileType == "" {
-		s := fmt.Sprintf("%s%s", config.GetConfig().DownloadFolder, fileName)
-		fmt.Println(s)
-		f, err := os.Create(s)
-		if err != nil {
-			fmt.Println("error creating file")
-		}
-		defer f.Close()
+		if get {
+			s := fmt.Sprintf("%s%s", config.GetConfig().DownloadFolder, fileName)
+			fmt.Println(s)
+			f, err := os.Create(s)
+			if err != nil {
+				fmt.Println("error creating file")
+			}
+			defer f.Close()
 
-		bytesWritten, err := f.Write(content)
-		if err != nil {
-			fmt.Println("error writing file")
+			bytesWritten, err := f.Write(content)
+			if err != nil {
+				fmt.Println("error writing file")
+			}
+			fmt.Printf("wrote %d bytes\n", bytesWritten)
+		} else {
+			fmt.Println(fileName)
 		}
-		fmt.Printf("wrote %d bytes\n", bytesWritten)
 	}
 }
 
