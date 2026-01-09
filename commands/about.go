@@ -21,24 +21,14 @@ type DeviceInfo struct {
 	UniqueID        string `yaml:"unique_id"`
 }
 
-var deviceInfo DeviceInfo
-
-func VersionCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:     "version",
-		Short:   "Version of the REST API",
-		Long:    "Returns the current version of the ReST API.",
-		GroupID: "platform",
-		Args:    cobra.ExactArgs(0),
-		Run: func(cmd *cobra.Command, args []string) {
-			network.SendHttpRequest(&network.HttpConfig{
-				URL:         network.GetUrl("version"),
-				Method:      http.MethodGet,
-				SetClientId: true,
-			})
-		},
-	}
+type VersionInfo struct {
+	Version string
+	Errors  []string
 }
+
+var deviceInfo DeviceInfo
+var versionInfo VersionInfo
+
 func DeviceInfoCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "info",
@@ -47,11 +37,21 @@ func DeviceInfoCommand() *cobra.Command {
 		GroupID: "platform",
 		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
+			version := network.SendHttpRequest(&network.HttpConfig{
+				URL:         network.GetUrl("version"),
+				Method:      http.MethodGet,
+				SetClientId: true,
+			})
+			var err error
+			err = yaml.Unmarshal(version, &versionInfo)
+			if err != nil {
+				log.Fatalf("Error parsing version: %v", err)
+			}
 			info := network.SendHttpRequest(&network.HttpConfig{
 				URL:    network.GetUrl("info"),
 				Method: http.MethodGet,
 			})
-			err := yaml.Unmarshal(info, &deviceInfo)
+			err = yaml.Unmarshal(info, &deviceInfo)
 			if err != nil {
 				log.Fatalf("Error parsing config file: %v", err)
 			}
@@ -61,6 +61,7 @@ func DeviceInfoCommand() *cobra.Command {
 			fmt.Printf("Firmware Version : %s\n", deviceInfo.FirmwareVersion)
 			fmt.Printf("FPGA Version     : %s\n", deviceInfo.FPGAVersion)
 			fmt.Printf("Core Version     : %s\n", deviceInfo.CoreVersion)
+			fmt.Printf("REST API Version : %s\n", versionInfo.Version)
 			fmt.Printf("Hostname         : %s\n", deviceInfo.Hostname)
 			fmt.Printf("Unique ID        : %s\n", deviceInfo.UniqueID)
 		},
