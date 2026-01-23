@@ -13,7 +13,7 @@
              //"console": "externalTerminal",
             "program": "main.go",
             "args": [
-                "--device","U64I","screenmem"
+                "--device","U64II","screenmem"
             ]
         }
     ]
