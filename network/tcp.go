@@ -22,7 +22,9 @@ func GetOutboundIP() net.IP {
 	}
 	defer conn.Close()
 	localAddr := conn.LocalAddr().(*net.UDPAddr)
+	fmt.Println(localAddr.IP.String())
 	return localAddr.IP
+
 }
 
 func IsMulticast(ip net.IP) bool {

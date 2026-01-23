@@ -13,7 +13,7 @@
              //"console": "externalTerminal",
             "program": "main.go",
             "args": [
-                "query","--year","2026"
+                "--device","U64I","screenmem"
             ]
         }
     ]
