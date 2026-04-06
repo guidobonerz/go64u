@@ -124,7 +124,9 @@ func ScreenshotCommand() *cobra.Command {
 
 func StreamController(streamPlatformName string) {
 	device := config.GetConfig().Devices[config.GetConfig().SelectedDevice]
+
 	stream("video", "start")
+	stream("audio", "start")
 
 	renderer := &streams.StreamRenderer{
 		ScaleFactor: 100,
@@ -136,8 +138,25 @@ func StreamController(streamPlatformName string) {
 		Device:   device,
 		Renderer: renderer,
 	}
-	videoReader.Init()
+
+	if err := videoReader.Init(); err != nil {
+		fmt.Printf("Init failed: %v\n", err)
+		stream("video", "stop")
+		stream("audio", "stop")
+		return
+	}
+
+	audioReader := &streams.AudioReader{
+		Device:   device,
+		StopChan: renderer.GetContext().Done(),
+		Muxer:    renderer.GetMuxer(),
+	}
+	go audioReader.Read()
+
 	videoReader.Read()
+
+	stream("video", "stop")
+	stream("audio", "stop")
 }
 
 func AudioController() {
