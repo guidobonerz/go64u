@@ -104,9 +104,8 @@ func NewMkvMuxer(w io.Writer, videoWidth, videoHeight, fps int, enableAudio bool
 	return m, nil
 }
 
-// WriteVideoFrame writes a PNG-encoded frame bundled with all audio
-// accumulated since the last frame. Both get the same timestamp,
-// keeping audio and video synchronized.
+// WriteVideoFrame writes a PNG-encoded frame to the video track,
+// then flushes buffered audio as properly-sized blocks.
 func (m *MkvMuxer) WriteVideoFrame(pngData []byte) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -118,10 +117,11 @@ func (m *MkvMuxer) WriteVideoFrame(pngData []byte) {
 	// Write video frame
 	m.writeSimpleBlock(1, relTS, 0x80, pngData)
 
-	// Flush accumulated audio
-	if m.audioEnabled && len(m.audioBuf) > 0 {
-		m.writeSimpleBlock(2, relTS, 0x80, m.audioBuf)
-		m.audioBuf = m.audioBuf[:0]
+	// Flush buffered audio in fixed-size blocks.
+	// At 48kHz stereo 16-bit, one frame duration (33ms) = 48000*2*2*33/1000 = 6336 bytes.
+	// We write blocks of ~6144 bytes (1536 samples) to keep blocks manageable.
+	if m.audioEnabled {
+		m.flushAudio(relTS)
 	}
 }
 
@@ -130,6 +130,20 @@ func (m *MkvMuxer) WriteAudio(pcmData []byte) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.audioBuf = append(m.audioBuf, pcmData...)
+}
+
+const audioBlockSize = 6144 // ~32ms of 48kHz stereo s16le (1536 samples * 4 bytes)
+
+func (m *MkvMuxer) flushAudio(relTS int16) {
+	for len(m.audioBuf) >= audioBlockSize {
+		m.writeSimpleBlock(2, relTS, 0x80, m.audioBuf[:audioBlockSize])
+		m.audioBuf = m.audioBuf[audioBlockSize:]
+	}
+	// Write any remaining partial block
+	if len(m.audioBuf) > 0 {
+		m.writeSimpleBlock(2, relTS, 0x80, m.audioBuf)
+		m.audioBuf = m.audioBuf[:0]
+	}
 }
 
 func (m *MkvMuxer) maybeNewCluster(ts int64) {

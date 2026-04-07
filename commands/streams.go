@@ -18,6 +18,7 @@ import (
 )
 
 var lastStreamId = -1
+var lastAudioDevice *config.Device
 
 type Device struct {
 	Name  string
@@ -69,17 +70,19 @@ func AudioStreamControllerCommand() *cobra.Command {
 
 func StreamCommand() *cobra.Command {
 	var cmd = &cobra.Command{
-		Use:     "stream [target]",
+		Use:     "stream",
 		Short:   "stream to your favourite streaming platform e.g twitch/youtube",
 		Long:    "stream to your favourite streaming platform e.g twitch/youtube",
 		GroupID: "stream",
-		Args:    cobra.ExactArgs(1),
+		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
-			record, _ := cmd.Flags().GetBool("record")
-			StreamController(args[0], record)
+			target, _ := cmd.Flags().GetString("target")
+			record, _ := cmd.Flags().GetString("record")
+			StreamController(target, record)
 		},
 	}
-	cmd.Flags().Bool("record", false, "also record the stream to a local file")
+	cmd.Flags().String("target", "", "streaming platform (e.g. twitch, youtube)")
+	cmd.Flags().String("record", "", "record locally: audio, video, or both")
 	return cmd
 }
 
@@ -126,14 +129,24 @@ func ScreenshotCommand() *cobra.Command {
 	return cmd
 }
 
-func StreamController(streamPlatformName string, record bool) {
+func StreamController(streamPlatformName string, record string) {
+	if streamPlatformName == "" && record == "" {
+		fmt.Println("Error: specify --target, --record, or both")
+		return
+	}
+
 	device := config.GetConfig().Devices[config.GetConfig().SelectedDevice]
 
 	stream("video", "start")
 	stream("audio", "start")
 
+	var url string
+	if streamPlatformName != "" {
+		url = config.GetConfig().StreamingTargets[strings.ToLower(streamPlatformName)]
+	}
+
 	var recordPath string
-	if record {
+	if record != "" {
 		recordPath = fmt.Sprintf("%sstream_%s.mp4",
 			config.GetConfig().RecordingFolder,
 			time.Now().Format("2006-01-02_15-04-05"))
@@ -142,9 +155,10 @@ func StreamController(streamPlatformName string, record bool) {
 	renderer := &streams.StreamRenderer{
 		ScaleFactor: 100,
 		Fps:         30,
-		Url:         config.GetConfig().StreamingTargets[strings.ToLower(streamPlatformName)],
+		Url:         url,
 		LogLevel:    config.GetConfig().LogLevel,
 		RecordPath:  recordPath,
+		RecordMode:  record,
 	}
 	videoReader := &streams.VideoReader{
 		Device:   device,
@@ -198,8 +212,7 @@ func AudioController() {
 		devices = append(devices, Device{Name: deviceName, Index: i})
 		i++
 	}
-	fmt.Println("[R] - start recording audio stream (not yet implemented)")
-	fmt.Println("[S] - stop recording audio stream (not yet implemented)")
+	fmt.Println("[S] - stop playing")
 	fmt.Println("[Q] - quit player")
 	scanner := bufio.NewScanner(os.Stdin)
 	fmt.Print(": ")
@@ -208,12 +221,27 @@ func AudioController() {
 			break
 		}
 		command := scanner.Text()
+		if command == "s" {
+			fmt.Print("\033[1A\033[0G\033[2K")
+			fmt.Println("stopped playing")
+			StopStreamChannel()
+			if lastAudioDevice != nil {
+				streams.AudioStop(lastAudioDevice)
+				lastAudioDevice = nil
+			}
+			lastStreamId = -1
+			fmt.Print(": ")
+			continue
+		}
 		if command == "q" {
 			fmt.Print("\033[1A\033[0G\033[2K")
 			fmt.Println("exit audio player")
-			lastStreamId = -1
 			StopStreamChannel()
-			//stopStream()
+			if lastAudioDevice != nil {
+				streams.AudioStop(lastAudioDevice)
+				lastAudioDevice = nil
+			}
+			lastStreamId = -1
 			break
 		}
 		fmt.Print("\033[1A\033[0G\033[2K: ")
@@ -222,10 +250,14 @@ func AudioController() {
 			if i > 0 && i <= len(devices) {
 				device := config.GetConfig().Devices[devices[i-1].Name]
 				if lastStreamId != i-1 || len(devices) == 1 {
-					lastStreamId = i - 1
 					StopStreamChannel()
+					if lastAudioDevice != nil {
+						streams.AudioStop(lastAudioDevice)
+					}
+					lastStreamId = i - 1
 					stopChan = make(chan struct{})
 					streams.AudioStart(device)
+					lastAudioDevice = device
 					audioReader := streams.AudioReader{
 						Device:       device,
 						AudioContext: otoCtx,
