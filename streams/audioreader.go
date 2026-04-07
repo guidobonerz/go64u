@@ -13,13 +13,38 @@ import (
 
 type AudioReader struct {
 	Device       *config.Device
-	AudioContext *oto.Context
-	Renderer     renderer.UpdateAudioSpectrum
+	AudioContext *oto.Context              // set for local playback mode
+	Renderer     renderer.UpdateAudioSpectrum // optional spectrum callback
 	StopChan     <-chan struct{}
+	Muxer        *MkvMuxer // set for streaming mode — writes audio to Matroska muxer
 }
 
 func (ar *AudioReader) Read() {
 	socket := ar.Device.AudioUdpConnection
+	buffer := make([]byte, 770)
+
+	// Streaming mode: just forward audio to the muxer, no oto playback
+	if ar.Muxer != nil {
+		for {
+			select {
+			case <-ar.StopChan:
+				return
+			default:
+			}
+			socket.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+			n, _, err := socket.ReadFromUDP(buffer)
+			if err != nil {
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					continue
+				}
+				log.Println("Audio stream UDP read error:", err)
+				return
+			}
+			ar.Muxer.WriteAudio(buffer[2:n])
+		}
+	}
+
+	// Local playback mode: play through oto
 	pr, pw := io.Pipe()
 	player := ar.AudioContext.NewPlayer(pr)
 	player.SetBufferSize(770 * 4)
@@ -27,9 +52,7 @@ func (ar *AudioReader) Read() {
 	go func() {
 		defer pw.Close()
 		defer close(done)
-		buffer := make([]byte, 770)
 		for {
-
 			socket.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 			n, _, err := socket.ReadFromUDP(buffer)
 			if err != nil {

@@ -245,7 +245,7 @@ func MessageCommand() *cobra.Command {
 func ReadFromMemory(address int, length uint16) byte {
 	queryConfig := &network.HttpConfig{
 		URL:    network.GetUrl(fmt.Sprintf("machine:readmem?address=%04x&length=%d", address, length)),
-		Method: http.MethodPut,
+		Method: http.MethodGet,
 	}
 	return network.SendHttpRequest(queryConfig)[0]
 

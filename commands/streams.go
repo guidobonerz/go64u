@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"drazil.de/go64u/config"
 	"drazil.de/go64u/imaging"
@@ -67,16 +68,19 @@ func AudioStreamControllerCommand() *cobra.Command {
 }
 
 func StreamCommand() *cobra.Command {
-	return &cobra.Command{
+	var cmd = &cobra.Command{
 		Use:     "stream [target]",
 		Short:   "stream to your favourite streaming platform e.g twitch/youtube",
 		Long:    "stream to your favourite streaming platform e.g twitch/youtube",
 		GroupID: "stream",
 		Args:    cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			StreamController(args[0])
+			record, _ := cmd.Flags().GetBool("record")
+			StreamController(args[0], record)
 		},
 	}
+	cmd.Flags().Bool("record", false, "also record the stream to a local file")
+	return cmd
 }
 
 func DebugStreamCommand() *cobra.Command {
@@ -122,22 +126,49 @@ func ScreenshotCommand() *cobra.Command {
 	return cmd
 }
 
-func StreamController(streamPlatformName string) {
+func StreamController(streamPlatformName string, record bool) {
 	device := config.GetConfig().Devices[config.GetConfig().SelectedDevice]
+
 	stream("video", "start")
+	stream("audio", "start")
+
+	var recordPath string
+	if record {
+		recordPath = fmt.Sprintf("%sstream_%s.mp4",
+			config.GetConfig().RecordingFolder,
+			time.Now().Format("2006-01-02_15-04-05"))
+	}
 
 	renderer := &streams.StreamRenderer{
 		ScaleFactor: 100,
 		Fps:         30,
 		Url:         config.GetConfig().StreamingTargets[strings.ToLower(streamPlatformName)],
 		LogLevel:    config.GetConfig().LogLevel,
+		RecordPath:  recordPath,
 	}
 	videoReader := &streams.VideoReader{
 		Device:   device,
 		Renderer: renderer,
 	}
-	videoReader.Init()
+
+	if err := videoReader.Init(); err != nil {
+		fmt.Printf("Init failed: %v\n", err)
+		stream("video", "stop")
+		stream("audio", "stop")
+		return
+	}
+
+	audioReader := &streams.AudioReader{
+		Device:   device,
+		StopChan: renderer.GetContext().Done(),
+		Muxer:    renderer.GetMuxer(),
+	}
+	go audioReader.Read()
+
 	videoReader.Read()
+
+	stream("video", "stop")
+	stream("audio", "stop")
 }
 
 func AudioController() {

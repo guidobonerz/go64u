@@ -37,7 +37,7 @@ var rootCmd = &cobra.Command{
 		}
 
 		if mode != 1 && mode != 2 {
-			fmt.Println("Too much arugemnts. you have to decide select one mode")
+			fmt.Println("Too much arugemnts. you have to select only one mode")
 			os.Exit(0)
 		}
 

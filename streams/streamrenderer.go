@@ -1,6 +1,7 @@
 package streams
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"image/png"
@@ -13,13 +14,17 @@ import (
 	"drazil.de/go64u/imaging"
 )
 
+const debugMuxer = false
+
 type StreamRenderer struct {
 	Fps         int
 	ScaleFactor int
 	Url         string
 	LogLevel    string
+	RecordPath  string // if set, also record to this file
 	cancel      context.CancelFunc
 	stdin       io.WriteCloser
+	muxer       *MkvMuxer
 	cmd         *exec.Cmd
 	ctx         context.Context
 	config      StreamConfig
@@ -36,8 +41,8 @@ type StreamConfig struct {
 
 func (d *StreamRenderer) Init() error {
 	d.config = StreamConfig{
-		Width:   1920,
-		Height:  1080,
+		Width:   imaging.WIDTH,
+		Height:  imaging.HEIGHT,
 		FPS:     30,
 		Bitrate: "3000k",
 	}
@@ -50,25 +55,22 @@ func (d *StreamRenderer) Init() error {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-sigChan
-		fmt.Println("\nReceived interrupt, stopping stream...")
+		fmt.Println("\nReceived interrupt, stopping stream gracefully...")
 		d.Shutdown()
-		os.Exit(0)
+		// Don't os.Exit — let FFmpeg finalize the recording file
 	}()
 
-	d.cmd = exec.CommandContext(d.ctx, "ffmpeg",
-		"-re", // Read input at native frame rate
+	fmt.Printf("Stream URL: [%s]\n", d.Url)
+	if d.Url == "" {
+		return fmt.Errorf("streaming URL is empty — check StreamingTargets in .go64u.yaml")
+	}
+
+	args := []string{
 		"-loglevel", d.LogLevel,
 
-		// Video input from stdin
-		"-f", "image2pipe",
-		"-vcodec", "png",
-		"-r", fmt.Sprintf("%d", d.config.FPS),
-		"-video_size", fmt.Sprintf("%dx%d", d.config.Width, d.config.Height),
+		// Single Matroska input carrying both video and audio
+		"-f", "matroska",
 		"-i", "pipe:0",
-
-		// Audio input (silent)
-		"-f", "lavfi",
-		"-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
 
 		// Video encoding
 		"-c:v", "libx264",
@@ -84,11 +86,21 @@ func (d *StreamRenderer) Init() error {
 		"-c:a", "aac",
 		"-b:a", "128k",
 		"-ar", "44100",
+	}
 
-		// Output
-		"-f", "flv",
-		d.Url,
-	)
+	if d.RecordPath != "" {
+		// Use tee muxer: stream to platform AND record to file simultaneously
+		fmt.Printf("Recording to: %s\n", d.RecordPath)
+		args = append(args,
+			"-f", "tee",
+			"-map", "0:v", "-map", "0:a",
+			fmt.Sprintf("[f=flv]%s|[f=mp4]%s", d.Url, d.RecordPath),
+		)
+	} else {
+		args = append(args, "-f", "flv", d.Url)
+	}
+
+	d.cmd = exec.CommandContext(d.ctx, "ffmpeg", args...)
 
 	var err error
 	d.stdin, err = d.cmd.StdinPipe()
@@ -106,6 +118,22 @@ func (d *StreamRenderer) Init() error {
 	}
 	fmt.Println("✓ FFmpeg process started (PID:", d.cmd.Process.Pid, ")")
 
+	// Create Matroska muxer writing to FFmpeg's stdin
+	var muxWriter io.Writer = d.stdin
+	if debugMuxer {
+		debugFile, derr := os.Create("debug_stream.mkv")
+		if derr == nil {
+			fmt.Println("✓ Debug file: debug_stream.mkv")
+			muxWriter = io.MultiWriter(d.stdin, debugFile)
+		}
+	}
+	d.muxer, err = NewMkvMuxer(muxWriter, d.config.Width, d.config.Height, d.config.FPS, true)
+	if err != nil {
+		d.cancel()
+		return fmt.Errorf("failed to create muxer: %w", err)
+	}
+	fmt.Println("✓ Matroska muxer initialized")
+
 	go func() {
 		fmt.Println("Monitoring FFmpeg process...")
 		err := d.cmd.Wait()
@@ -119,7 +147,7 @@ func (d *StreamRenderer) Init() error {
 		}
 	}()
 
-	fmt.Println("✓ FFmpeg stream initialization complete")
+	fmt.Println("✓ Stream initialization complete")
 	fmt.Println("Ready to receive frames...")
 	return nil
 }
@@ -136,7 +164,7 @@ func (d *StreamRenderer) Render(data []byte) bool {
 			fmt.Printf("[Frame %d] Received %d bytes of data\n", d.frameCount, len(data))
 		}
 
-		img := imaging.GetImageFromBytes(data, 100)
+		img := imaging.GetImageFromBytes(data, d.ScaleFactor)
 		if img == nil {
 			fmt.Printf("[Frame %d] ERROR: Failed to get image from bytes\n", d.frameCount)
 			return false
@@ -147,10 +175,13 @@ func (d *StreamRenderer) Render(data []byte) bool {
 			fmt.Printf("[Frame %d] Image size: %dx%d\n", d.frameCount, bounds.Dx(), bounds.Dy())
 		}
 
-		if err := png.Encode(d.stdin, img); err != nil {
-			fmt.Printf("[Frame %d] ERROR: Failed to encode: %v\n", d.frameCount, err)
+		var buf bytes.Buffer
+		if err := png.Encode(&buf, img); err != nil {
+			fmt.Printf("[Frame %d] ERROR: Failed to encode PNG: %v\n", d.frameCount, err)
 			return false
 		}
+
+		d.muxer.WriteVideoFrame(buf.Bytes())
 
 		if d.frameCount%d.config.FPS == 0 {
 			fmt.Printf("=== Streamed %d seconds (%d frames) ===\n",
@@ -161,6 +192,17 @@ func (d *StreamRenderer) Render(data []byte) bool {
 	}
 }
 
+func (d *StreamRenderer) WriteAudio(data []byte) {
+	if d.muxer == nil {
+		return
+	}
+	d.muxer.WriteAudio(data)
+}
+
+func (d *StreamRenderer) GetMuxer() *MkvMuxer {
+	return d.muxer
+}
+
 func (d *StreamRenderer) GetContext() context.Context {
 	return d.ctx
 }
@@ -168,11 +210,16 @@ func (d *StreamRenderer) GetContext() context.Context {
 func (d *StreamRenderer) Shutdown() {
 	fmt.Println("\n=== Shutting down stream ===")
 	if d.stdin != nil {
-		fmt.Println("Closing stdin pipe...")
+		fmt.Println("Closing stdin pipe (FFmpeg will finalize output)...")
 		d.stdin.Close()
+		d.stdin = nil
+	}
+	// Wait for FFmpeg to finish writing (moov atom for MP4, etc.)
+	if d.cmd != nil && d.cmd.Process != nil {
+		fmt.Println("Waiting for FFmpeg to finish...")
+		d.cmd.Wait()
 	}
 	if d.cancel != nil {
-		fmt.Println("Cancelling context...")
 		d.cancel()
 	}
 	fmt.Println("Shutdown complete")
