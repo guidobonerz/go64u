@@ -72,6 +72,9 @@ func (d *StreamRenderer) Init() error {
 		"-f", "matroska",
 		"-i", "pipe:0",
 
+		// Scale up to 1080p for streaming
+		"-vf", "scale=1920:1080:flags=neighbor",
+
 		// Video encoding
 		"-c:v", "libx264",
 		"-preset", "veryfast",
@@ -102,15 +105,19 @@ func (d *StreamRenderer) Init() error {
 
 	d.cmd = exec.CommandContext(d.ctx, "ffmpeg", args...)
 
-	var err error
+	logFile, err := os.Create("ffmpeg.log")
+	if err != nil {
+		return fmt.Errorf("failed to create ffmpeg log file: %w", err)
+	}
+	d.cmd.Stdout = logFile
+	d.cmd.Stderr = logFile
+	fmt.Println("✓ FFmpeg log: ffmpeg.log")
+
 	d.stdin, err = d.cmd.StdinPipe()
 	if err != nil {
 		return fmt.Errorf("failed to get stdin pipe: %w", err)
 	}
 	fmt.Println("✓ Got stdin pipe")
-
-	d.cmd.Stdout = os.Stdout
-	d.cmd.Stderr = os.Stderr
 
 	fmt.Println("Starting FFmpeg process...")
 	if err = d.cmd.Start(); err != nil {
