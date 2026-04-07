@@ -18,6 +18,13 @@ StreamingTargets:
   OTHER: rtmp://
 DumpFolder: <path to dump folder>
 ScreenshotFolder: <path to screenshot folder>
+RecordingFolder: <path to recording folder>
+Overlay:
+  ImagePath: <path to 1920x1080 overlay PNG with transparent game area>
+  GameX: 160
+  GameY: 100
+  GameW: 1536
+  GameH: 1088
 
 
 
