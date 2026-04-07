@@ -17,11 +17,12 @@ Current functions
 * terminal mode
 * selectable audiostream player
 * rtmp stream/recording(mp4) via ffmpeg
+* show image overlay around your stream
 
 Some commands are only available in terminal mode
 * cd (change directory)
 * asc (audio stream controller)
-* stream (stream to your favourite platform, usually needs a streaming key)
+* stream (stream to your favourite platform, usually needs a streaming api key)
 
 ### Folder structure with icons
 ![Styled Directory](https://github.com/guidobonerz/go64u/blob/develop/doc/list.png)
@@ -33,7 +34,6 @@ Some commands are only available in terminal mode
 ## Todo's
 * add gui frontend (currently available experimental, still buggy)
 * add streaming client for video (monitor mode)
-* record audio
 * list and change dir (local and remote)
 * disassembler with dialect option
 
@@ -43,6 +43,7 @@ Create an environment variable **GO64U_CONFIG_PATH** where the **.go64u.yaml** f
 The structure of the file is currently as follows
 
 ```
+LogLevel: quiet
 Devices:
   DEVICE_NAME[n]:
     Description: "Device name"
@@ -58,6 +59,13 @@ LogLevel: ffmpeg_loglevel
 DumpFolder: <path to dump folder>
 RecordingFolder: <path to recording folder>
 ScreenshotFolder: <path to screenshot folder>
+DownloadFolder : <path to download folder>
+Overlay:
+    X: 700
+    Y: 200
+    WIDTH: 800
+    HEIGHT: 600
+    ImagePath: <path to overly image>
 ```
 NOTE: <span style="color:red">If you have more than one Ultimate64 board, you have to choose different ports for each board</span>
 
@@ -79,5 +87,5 @@ go64u --gui
 
 ## How to stream to twitch or other platforms
 start go64u in terminal mode : .\go64u.exe --terminal
-then type **stream target_name** e.g. **stream twitch**
+then type **stream target_name** e.g. **stream --target twitch**
 

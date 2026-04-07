@@ -179,14 +179,14 @@ func (m *MkvMuxer) writeSimpleBlock(trackNum int, relTS int16, flags byte, data 
 // --- Matroska track builders ------------------------------------------------
 
 func buildVideoTrack(width, height, fps int) []byte {
-	// BitmapInfoHeader (40 bytes) for V_MS/VFW/FOURCC with MPNG fourcc
+	// BitmapInfoHeader (40 bytes) for V_MS/VFW/FOURCC with raw BGRA
 	bih := make([]byte, 40)
 	binary.LittleEndian.PutUint32(bih[0:], 40)
 	binary.LittleEndian.PutUint32(bih[4:], uint32(width))
 	binary.LittleEndian.PutUint32(bih[8:], uint32(height))
 	binary.LittleEndian.PutUint16(bih[12:], 1)  // planes
-	binary.LittleEndian.PutUint16(bih[14:], 24) // bits per pixel
-	copy(bih[16:20], []byte("MPNG"))
+	binary.LittleEndian.PutUint16(bih[14:], 32) // bits per pixel
+	copy(bih[16:20], []byte("BGRA"))
 
 	entry := join(
 		mkUint(elTrackNumber, 1),
