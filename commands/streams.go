@@ -69,17 +69,20 @@ func AudioStreamControllerCommand() *cobra.Command {
 
 func StreamCommand() *cobra.Command {
 	var cmd = &cobra.Command{
-		Use:     "stream [target]",
+		Use:     "stream",
 		Short:   "stream to your favourite streaming platform e.g twitch/youtube",
 		Long:    "stream to your favourite streaming platform e.g twitch/youtube",
 		GroupID: "stream",
-		Args:    cobra.ExactArgs(1),
+		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
-			record, _ := cmd.Flags().GetBool("record")
-			StreamController(args[0], record)
+			target, _ := cmd.Flags().GetString("target")
+			record, _ := cmd.Flags().GetString("record")
+			StreamController(target, record)
 		},
 	}
-	cmd.Flags().Bool("record", false, "also record the stream to a local file")
+	cmd.Flags().String("target", "", "streaming platform (e.g. twitch, youtube)")
+	cmd.Flags().String("record", "", "record locally: audio, video, or both")
+	cmd.MarkFlagRequired("target")
 	return cmd
 }
 
@@ -126,14 +129,14 @@ func ScreenshotCommand() *cobra.Command {
 	return cmd
 }
 
-func StreamController(streamPlatformName string, record bool) {
+func StreamController(streamPlatformName string, record string) {
 	device := config.GetConfig().Devices[config.GetConfig().SelectedDevice]
 
 	stream("video", "start")
 	stream("audio", "start")
 
 	var recordPath string
-	if record {
+	if record != "" {
 		recordPath = fmt.Sprintf("%sstream_%s.mp4",
 			config.GetConfig().RecordingFolder,
 			time.Now().Format("2006-01-02_15-04-05"))
@@ -145,6 +148,7 @@ func StreamController(streamPlatformName string, record bool) {
 		Url:         config.GetConfig().StreamingTargets[strings.ToLower(streamPlatformName)],
 		LogLevel:    config.GetConfig().LogLevel,
 		RecordPath:  recordPath,
+		RecordMode:  record,
 	}
 	videoReader := &streams.VideoReader{
 		Device:   device,

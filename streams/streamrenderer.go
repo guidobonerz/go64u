@@ -22,6 +22,7 @@ type StreamRenderer struct {
 	Url         string
 	LogLevel    string
 	RecordPath  string // if set, also record to this file
+	RecordMode  string // "audio", "video", or "both"
 	cancel      context.CancelFunc
 	stdin       io.WriteCloser
 	muxer       *MkvMuxer
@@ -93,11 +94,22 @@ func (d *StreamRenderer) Init() error {
 
 	if d.RecordPath != "" {
 		// Use tee muxer: stream to platform AND record to file simultaneously
-		fmt.Printf("Recording to: %s\n", d.RecordPath)
+		fmt.Printf("Recording to: %s (mode: %s)\n", d.RecordPath, d.RecordMode)
+
+		var recordStreams string
+		switch d.RecordMode {
+		case "audio":
+			recordStreams = "[f=mp4:select=\\'a\\']" + d.RecordPath
+		case "video":
+			recordStreams = "[f=mp4:select=\\'v\\']" + d.RecordPath
+		default: // "both"
+			recordStreams = "[f=mp4]" + d.RecordPath
+		}
+
 		args = append(args,
 			"-f", "tee",
 			"-map", "0:v", "-map", "0:a",
-			fmt.Sprintf("[f=flv]%s|[f=mp4]%s", d.Url, d.RecordPath),
+			fmt.Sprintf("[f=flv]%s|%s", d.Url, recordStreams),
 		)
 	} else {
 		args = append(args, "-f", "flv", d.Url)
