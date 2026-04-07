@@ -210,6 +210,7 @@ func createControllerPanel(deviceName string, device *config.Device) *unison.Pan
 			close(device.AudioChannel)
 			device.AudioChannel = nil
 		}
+		streams.AudioStop(device)
 	})
 	panel.AddChild(buttonPanel)
 	panel.AddChild(imagePanel)
