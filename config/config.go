@@ -12,6 +12,14 @@ import (
 
 var config Config
 
+type Overlay struct {
+	ImagePath string `yaml:"ImagePath"`
+	X         int    `yaml:"X"`
+	Y         int    `yaml:"Y"`
+	WITH      int    `yaml:"WIDTH"`
+	HEIGHT    int    `yaml:"HEIGHT"`
+}
+
 type Config struct {
 	Password         string             `yaml:"Password"`
 	Devices          map[string]*Device `yaml:"Devices"`
@@ -24,6 +32,7 @@ type Config struct {
 	LogLevel         string             `yaml:"LogLevel"`
 	ResourceUrl      string             `yaml:"ResourceUrl"`
 	DatabaseClient   string             `yaml:"DatabaseClient"`
+	Overlay          Overlay            `yaml:"Overlay"`
 }
 
 type Device struct {

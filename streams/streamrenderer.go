@@ -1,9 +1,9 @@
 package streams
 
 import (
-	"bytes"
 	"context"
 	"fmt"
+	"image"
 	"image/png"
 	"io"
 	"os"
@@ -11,10 +11,14 @@ import (
 	"os/signal"
 	"syscall"
 
+	"drazil.de/go64u/config"
 	"drazil.de/go64u/imaging"
 )
 
 const debugMuxer = false
+
+const outputW = 1920
+const outputH = 1080
 
 type StreamRenderer struct {
 	Fps         int
@@ -30,6 +34,8 @@ type StreamRenderer struct {
 	ctx         context.Context
 	config      StreamConfig
 	frameCount  int
+	overlayImg image.Image // loaded once in Init, nil if no overlay
+	bgraBuf    []byte      // reused BGRA output buffer (outputW*outputH*4)
 }
 
 type StreamConfig struct {
@@ -42,8 +48,8 @@ type StreamConfig struct {
 
 func (d *StreamRenderer) Init() error {
 	d.config = StreamConfig{
-		Width:   imaging.WIDTH,
-		Height:  imaging.HEIGHT,
+		Width:   outputW,
+		Height:  outputH,
 		FPS:     30,
 		Bitrate: "3000k",
 	}
@@ -58,12 +64,31 @@ func (d *StreamRenderer) Init() error {
 		<-sigChan
 		fmt.Println("\nReceived interrupt, stopping stream gracefully...")
 		d.Shutdown()
-		// Don't os.Exit — let FFmpeg finalize the recording file
 	}()
 
 	if d.Url == "" && d.RecordPath == "" {
 		return fmt.Errorf("no streaming target or recording path specified")
 	}
+
+	// Load overlay image if configured
+	overlay := config.GetConfig().Overlay
+	if overlay.ImagePath != "" {
+		f, err := os.Open(overlay.ImagePath)
+		if err != nil {
+			return fmt.Errorf("failed to open overlay image: %w", err)
+		}
+		defer f.Close()
+		img, err := png.Decode(f)
+		if err != nil {
+			return fmt.Errorf("failed to decode overlay PNG: %w", err)
+		}
+		d.overlayImg = img
+		fmt.Printf("✓ Overlay loaded: %s (%dx%d)\n", overlay.ImagePath,
+			img.Bounds().Dx(), img.Bounds().Dy())
+	}
+
+	// Reusable compositing context and fast PNG encoder
+	d.bgraBuf = make([]byte, outputW*outputH*4)
 
 	args := []string{
 		"-loglevel", d.LogLevel,
@@ -71,9 +96,6 @@ func (d *StreamRenderer) Init() error {
 		// Single Matroska input carrying both video and audio
 		"-f", "matroska",
 		"-i", "pipe:0",
-
-		// Scale up to 1080p preserving aspect ratio, pad with black bars
-		"-vf", "scale=1920:1080:force_original_aspect_ratio=decrease:flags=neighbor,pad=1920:1080:-1:-1:color=black",
 
 		// Video encoding
 		"-c:v", "libx264",
@@ -95,7 +117,6 @@ func (d *StreamRenderer) Init() error {
 	hasRecord := d.RecordPath != ""
 
 	if hasStream && hasRecord {
-		// Tee muxer: stream + record simultaneously
 		fmt.Printf("Streaming to: %s\n", d.Url)
 		fmt.Printf("Recording to: %s (mode: %s)\n", d.RecordPath, d.RecordMode)
 
@@ -115,7 +136,6 @@ func (d *StreamRenderer) Init() error {
 			fmt.Sprintf("[f=flv]%s|%s", d.Url, recordOutput),
 		)
 	} else if hasRecord {
-		// Record only — no streaming
 		fmt.Printf("Recording to: %s (mode: %s)\n", d.RecordPath, d.RecordMode)
 
 		switch d.RecordMode {
@@ -127,7 +147,6 @@ func (d *StreamRenderer) Init() error {
 			args = append(args, "-f", "mp4", d.RecordPath)
 		}
 	} else {
-		// Stream only
 		fmt.Printf("Streaming to: %s\n", d.Url)
 		args = append(args, "-f", "flv", d.Url)
 	}
@@ -211,13 +230,9 @@ func (d *StreamRenderer) Render(data []byte) bool {
 			fmt.Printf("[Frame %d] Image size: %dx%d\n", d.frameCount, bounds.Dx(), bounds.Dy())
 		}
 
-		var buf bytes.Buffer
-		if err := png.Encode(&buf, img); err != nil {
-			fmt.Printf("[Frame %d] ERROR: Failed to encode PNG: %v\n", d.frameCount, err)
-			return false
-		}
-
-		d.muxer.WriteVideoFrame(buf.Bytes())
+		// Compose 1920x1080 output frame and send raw BGRA pixels
+		d.composeFrame(img)
+		d.muxer.WriteVideoFrame(d.bgraBuf)
 
 		if d.frameCount%d.config.FPS == 0 {
 			fmt.Printf("=== Streamed %d seconds (%d frames) ===\n",
@@ -225,6 +240,123 @@ func (d *StreamRenderer) Render(data []byte) bool {
 		}
 
 		return true
+	}
+}
+
+func (d *StreamRenderer) composeFrame(gameImg image.Image) {
+	buf := d.bgraBuf
+
+	// Clear to black
+	for i := range buf {
+		buf[i] = 0
+	}
+
+	bounds := gameImg.Bounds()
+	srcW := bounds.Dx()
+	srcH := bounds.Dy()
+
+	var dstX, dstY, dstW, dstH int
+
+	if d.overlayImg != nil {
+		overlay := config.GetConfig().Overlay
+		dstX = overlay.X
+		dstY = overlay.Y
+		dstW = overlay.WITH
+		dstH = overlay.HEIGHT
+	} else {
+		// No overlay: scale to max height, center horizontally
+		dstH = outputH
+		dstW = srcW * outputH / srcH
+		dstX = (outputW - dstW) / 2
+		dstY = 0
+	}
+
+	// Nearest-neighbor scale game directly into BGRA buffer
+	for y := 0; y < dstH; y++ {
+		srcY := y * srcH / dstH
+		for x := 0; x < dstW; x++ {
+			srcX := x * srcW / dstW
+			r, g, b, a := gameImg.At(bounds.Min.X+srcX, bounds.Min.Y+srcY).RGBA()
+			off := ((dstY+y)*outputW + (dstX + x)) * 4
+			if off+3 < len(buf) {
+				buf[off+0] = byte(b >> 8)
+				buf[off+1] = byte(g >> 8)
+				buf[off+2] = byte(r >> 8)
+				buf[off+3] = byte(a >> 8)
+			}
+		}
+	}
+
+	// Draw overlay on top of the game
+	if d.overlayImg != nil {
+		blitToBGRA(buf, d.overlayImg, 0, 0, outputW, outputH, outputW)
+	}
+}
+
+// blitToBGRA alpha-blends an image onto the BGRA buffer.
+// Transparent pixels are skipped, semi-transparent pixels are blended.
+func blitToBGRA(buf []byte, img image.Image, dstX, dstY, dstW, dstH, stride int) {
+	bounds := img.Bounds()
+	maxX := bounds.Dx()
+	maxY := bounds.Dy()
+	if maxX > dstW-dstX {
+		maxX = dstW - dstX
+	}
+	if maxY > dstH-dstY {
+		maxY = dstH - dstY
+	}
+
+	// Fast path for *image.NRGBA (common PNG decode result)
+	if nrgba, ok := img.(*image.NRGBA); ok {
+		for y := 0; y < maxY; y++ {
+			srcOff := (bounds.Min.Y+y-nrgba.Rect.Min.Y)*nrgba.Stride + (bounds.Min.X-nrgba.Rect.Min.X)*4
+			dstOff := ((dstY+y)*stride + dstX) * 4
+			for x := 0; x < maxX; x++ {
+				si := srcOff + x*4
+				a := uint16(nrgba.Pix[si+3])
+				if a == 0 {
+					continue
+				}
+				di := dstOff + x*4
+				if a == 255 {
+					buf[di+0] = nrgba.Pix[si+2]
+					buf[di+1] = nrgba.Pix[si+1]
+					buf[di+2] = nrgba.Pix[si+0]
+					buf[di+3] = 255
+				} else {
+					invA := 255 - a
+					buf[di+0] = byte((a*uint16(nrgba.Pix[si+2]) + invA*uint16(buf[di+0])) / 255)
+					buf[di+1] = byte((a*uint16(nrgba.Pix[si+1]) + invA*uint16(buf[di+1])) / 255)
+					buf[di+2] = byte((a*uint16(nrgba.Pix[si+0]) + invA*uint16(buf[di+2])) / 255)
+					buf[di+3] = 255
+				}
+			}
+		}
+		return
+	}
+
+	for y := 0; y < maxY; y++ {
+		for x := 0; x < maxX; x++ {
+			r, g, b, a := img.At(bounds.Min.X+x, bounds.Min.Y+y).RGBA()
+			if a == 0 {
+				continue
+			}
+			off := ((dstY+y)*stride + (dstX + x)) * 4
+			a8 := byte(a >> 8)
+			if a8 == 255 {
+				buf[off+0] = byte(b >> 8)
+				buf[off+1] = byte(g >> 8)
+				buf[off+2] = byte(r >> 8)
+				buf[off+3] = 255
+			} else {
+				sa := uint16(a8)
+				invA := 255 - sa
+				buf[off+0] = byte((sa*uint16(b>>8) + invA*uint16(buf[off+0])) / 255)
+				buf[off+1] = byte((sa*uint16(g>>8) + invA*uint16(buf[off+1])) / 255)
+				buf[off+2] = byte((sa*uint16(r>>8) + invA*uint16(buf[off+2])) / 255)
+				buf[off+3] = 255
+			}
+		}
 	}
 }
 
@@ -250,7 +382,6 @@ func (d *StreamRenderer) Shutdown() {
 		d.stdin.Close()
 		d.stdin = nil
 	}
-	// Wait for FFmpeg to finish writing (moov atom for MP4, etc.)
 	if d.cmd != nil && d.cmd.Process != nil {
 		fmt.Println("Waiting for FFmpeg to finish...")
 		d.cmd.Wait()
