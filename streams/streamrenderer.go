@@ -61,9 +61,8 @@ func (d *StreamRenderer) Init() error {
 		// Don't os.Exit — let FFmpeg finalize the recording file
 	}()
 
-	fmt.Printf("Stream URL: [%s]\n", d.Url)
-	if d.Url == "" {
-		return fmt.Errorf("streaming URL is empty — check StreamingTargets in .go64u.yaml")
+	if d.Url == "" && d.RecordPath == "" {
+		return fmt.Errorf("no streaming target or recording path specified")
 	}
 
 	args := []string{
@@ -92,26 +91,44 @@ func (d *StreamRenderer) Init() error {
 		"-ar", "44100",
 	}
 
-	if d.RecordPath != "" {
-		// Use tee muxer: stream to platform AND record to file simultaneously
+	hasStream := d.Url != ""
+	hasRecord := d.RecordPath != ""
+
+	if hasStream && hasRecord {
+		// Tee muxer: stream + record simultaneously
+		fmt.Printf("Streaming to: %s\n", d.Url)
 		fmt.Printf("Recording to: %s (mode: %s)\n", d.RecordPath, d.RecordMode)
 
-		var recordStreams string
+		var recordOutput string
 		switch d.RecordMode {
 		case "audio":
-			recordStreams = "[f=mp4:select=\\'a\\']" + d.RecordPath
+			recordOutput = "[f=mp4:select=\\'a\\']" + d.RecordPath
 		case "video":
-			recordStreams = "[f=mp4:select=\\'v\\']" + d.RecordPath
-		default: // "both"
-			recordStreams = "[f=mp4]" + d.RecordPath
+			recordOutput = "[f=mp4:select=\\'v\\']" + d.RecordPath
+		default:
+			recordOutput = "[f=mp4]" + d.RecordPath
 		}
 
 		args = append(args,
 			"-f", "tee",
 			"-map", "0:v", "-map", "0:a",
-			fmt.Sprintf("[f=flv]%s|%s", d.Url, recordStreams),
+			fmt.Sprintf("[f=flv]%s|%s", d.Url, recordOutput),
 		)
+	} else if hasRecord {
+		// Record only — no streaming
+		fmt.Printf("Recording to: %s (mode: %s)\n", d.RecordPath, d.RecordMode)
+
+		switch d.RecordMode {
+		case "audio":
+			args = append(args, "-map", "0:a", "-f", "mp4", d.RecordPath)
+		case "video":
+			args = append(args, "-map", "0:v", "-an", "-f", "mp4", d.RecordPath)
+		default:
+			args = append(args, "-f", "mp4", d.RecordPath)
+		}
 	} else {
+		// Stream only
+		fmt.Printf("Streaming to: %s\n", d.Url)
 		args = append(args, "-f", "flv", d.Url)
 	}
 

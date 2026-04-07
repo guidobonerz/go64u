@@ -82,7 +82,6 @@ func StreamCommand() *cobra.Command {
 	}
 	cmd.Flags().String("target", "", "streaming platform (e.g. twitch, youtube)")
 	cmd.Flags().String("record", "", "record locally: audio, video, or both")
-	cmd.MarkFlagRequired("target")
 	return cmd
 }
 
@@ -130,10 +129,20 @@ func ScreenshotCommand() *cobra.Command {
 }
 
 func StreamController(streamPlatformName string, record string) {
+	if streamPlatformName == "" && record == "" {
+		fmt.Println("Error: specify --target, --record, or both")
+		return
+	}
+
 	device := config.GetConfig().Devices[config.GetConfig().SelectedDevice]
 
 	stream("video", "start")
 	stream("audio", "start")
+
+	var url string
+	if streamPlatformName != "" {
+		url = config.GetConfig().StreamingTargets[strings.ToLower(streamPlatformName)]
+	}
 
 	var recordPath string
 	if record != "" {
@@ -145,7 +154,7 @@ func StreamController(streamPlatformName string, record string) {
 	renderer := &streams.StreamRenderer{
 		ScaleFactor: 100,
 		Fps:         30,
-		Url:         config.GetConfig().StreamingTargets[strings.ToLower(streamPlatformName)],
+		Url:         url,
 		LogLevel:    config.GetConfig().LogLevel,
 		RecordPath:  recordPath,
 		RecordMode:  record,
