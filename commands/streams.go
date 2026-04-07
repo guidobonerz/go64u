@@ -18,6 +18,7 @@ import (
 )
 
 var lastStreamId = -1
+var lastAudioDevice *config.Device
 
 type Device struct {
 	Name  string
@@ -211,8 +212,7 @@ func AudioController() {
 		devices = append(devices, Device{Name: deviceName, Index: i})
 		i++
 	}
-	fmt.Println("[R] - start recording audio stream (not yet implemented)")
-	fmt.Println("[S] - stop recording audio stream (not yet implemented)")
+	fmt.Println("[S] - stop playing")
 	fmt.Println("[Q] - quit player")
 	scanner := bufio.NewScanner(os.Stdin)
 	fmt.Print(": ")
@@ -221,12 +221,27 @@ func AudioController() {
 			break
 		}
 		command := scanner.Text()
+		if command == "s" {
+			fmt.Print("\033[1A\033[0G\033[2K")
+			fmt.Println("stopped playing")
+			StopStreamChannel()
+			if lastAudioDevice != nil {
+				streams.AudioStop(lastAudioDevice)
+				lastAudioDevice = nil
+			}
+			lastStreamId = -1
+			fmt.Print(": ")
+			continue
+		}
 		if command == "q" {
 			fmt.Print("\033[1A\033[0G\033[2K")
 			fmt.Println("exit audio player")
-			lastStreamId = -1
 			StopStreamChannel()
-			//stopStream()
+			if lastAudioDevice != nil {
+				streams.AudioStop(lastAudioDevice)
+				lastAudioDevice = nil
+			}
+			lastStreamId = -1
 			break
 		}
 		fmt.Print("\033[1A\033[0G\033[2K: ")
@@ -235,10 +250,14 @@ func AudioController() {
 			if i > 0 && i <= len(devices) {
 				device := config.GetConfig().Devices[devices[i-1].Name]
 				if lastStreamId != i-1 || len(devices) == 1 {
-					lastStreamId = i - 1
 					StopStreamChannel()
+					if lastAudioDevice != nil {
+						streams.AudioStop(lastAudioDevice)
+					}
+					lastStreamId = i - 1
 					stopChan = make(chan struct{})
 					streams.AudioStart(device)
+					lastAudioDevice = device
 					audioReader := streams.AudioReader{
 						Device:       device,
 						AudioContext: otoCtx,

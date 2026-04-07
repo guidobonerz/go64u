@@ -54,9 +54,17 @@ func DebugStart(device *config.Device) {
 
 func AudioStop(device *config.Device) {
 	stopStream(AUDIO_STOP, device.IpAddress)
+	if device.AudioUdpConnection != nil {
+		device.AudioUdpConnection.Close()
+		device.AudioUdpConnection = nil
+	}
 }
 func VideoStop(device *config.Device) {
 	stopStream(VIDEO_STOP, device.IpAddress)
+	if device.VideoUdpConnection != nil {
+		device.VideoUdpConnection.Close()
+		device.VideoUdpConnection = nil
+	}
 }
 func DebugStop(device *config.Device) {
 	stopStream(DEBUG_STOP, device.IpAddress)

@@ -72,8 +72,8 @@ func (d *StreamRenderer) Init() error {
 		"-f", "matroska",
 		"-i", "pipe:0",
 
-		// Scale up to 1080p for streaming
-		"-vf", "scale=1920:1080:flags=neighbor",
+		// Scale up to 1080p preserving aspect ratio, pad with black bars
+		"-vf", "scale=1920:1080:force_original_aspect_ratio=decrease:flags=neighbor,pad=1920:1080:-1:-1:color=black",
 
 		// Video encoding
 		"-c:v", "libx264",
