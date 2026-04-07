@@ -16,6 +16,7 @@ Current functions
 * navigate through internal storage via ls/cd over ftp connection
 * terminal mode
 * selectable audiostream player
+* rtmp stream/recording(mp4) via ffmpeg
 
 Some commands are only available in terminal mode
 * cd (change directory)
@@ -31,7 +32,6 @@ Some commands are only available in terminal mode
 
 ## Todo's
 * add gui frontend (currently available experimental, still buggy)
-* twitch stream
 * add streaming client for video (monitor mode)
 * record audio
 * list and change dir (local and remote)
@@ -56,11 +56,12 @@ StreamingTargets:
   <second platform...>: rtmp://
 LogLevel: ffmpeg_loglevel
 DumpFolder: <path to dump folder>
+RecordingFolder: <path to recording folder>
 ScreenshotFolder: <path to screenshot folder>
 ```
-NOTE: If you have more than one Ultimate64 board, you have to choose different ports for each board
+NOTE: <span style="color:red">If you have more than one Ultimate64 board, you have to choose different ports for each board</span>
 
-NOTE: If you want to stream the u64 stream via rtmp to twitch, youtube, etc. you need to install ffmpeg
+NOTE: <span style="color:red">If you want to stream the u64 stream via rtmp to twitch, youtube, etc. you need to install ffmpeg</span>
 
 ## How to start
 
