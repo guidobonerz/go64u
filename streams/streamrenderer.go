@@ -21,6 +21,7 @@ type StreamRenderer struct {
 	ScaleFactor int
 	Url         string
 	LogLevel    string
+	RecordPath  string // if set, also record to this file
 	cancel      context.CancelFunc
 	stdin       io.WriteCloser
 	muxer       *MkvMuxer
@@ -54,9 +55,9 @@ func (d *StreamRenderer) Init() error {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-sigChan
-		fmt.Println("\nReceived interrupt, stopping stream...")
+		fmt.Println("\nReceived interrupt, stopping stream gracefully...")
 		d.Shutdown()
-		os.Exit(0)
+		// Don't os.Exit — let FFmpeg finalize the recording file
 	}()
 
 	fmt.Printf("Stream URL: [%s]\n", d.Url)
@@ -64,7 +65,7 @@ func (d *StreamRenderer) Init() error {
 		return fmt.Errorf("streaming URL is empty — check StreamingTargets in .go64u.yaml")
 	}
 
-	d.cmd = exec.CommandContext(d.ctx, "ffmpeg",
+	args := []string{
 		"-loglevel", d.LogLevel,
 
 		// Single Matroska input carrying both video and audio
@@ -85,11 +86,21 @@ func (d *StreamRenderer) Init() error {
 		"-c:a", "aac",
 		"-b:a", "128k",
 		"-ar", "44100",
+	}
 
-		// Output
-		"-f", "flv",
-		d.Url,
-	)
+	if d.RecordPath != "" {
+		// Use tee muxer: stream to platform AND record to file simultaneously
+		fmt.Printf("Recording to: %s\n", d.RecordPath)
+		args = append(args,
+			"-f", "tee",
+			"-map", "0:v", "-map", "0:a",
+			fmt.Sprintf("[f=flv]%s|[f=mp4]%s", d.Url, d.RecordPath),
+		)
+	} else {
+		args = append(args, "-f", "flv", d.Url)
+	}
+
+	d.cmd = exec.CommandContext(d.ctx, "ffmpeg", args...)
 
 	var err error
 	d.stdin, err = d.cmd.StdinPipe()
@@ -199,11 +210,16 @@ func (d *StreamRenderer) GetContext() context.Context {
 func (d *StreamRenderer) Shutdown() {
 	fmt.Println("\n=== Shutting down stream ===")
 	if d.stdin != nil {
-		fmt.Println("Closing stdin pipe...")
+		fmt.Println("Closing stdin pipe (FFmpeg will finalize output)...")
 		d.stdin.Close()
+		d.stdin = nil
+	}
+	// Wait for FFmpeg to finish writing (moov atom for MP4, etc.)
+	if d.cmd != nil && d.cmd.Process != nil {
+		fmt.Println("Waiting for FFmpeg to finish...")
+		d.cmd.Wait()
 	}
 	if d.cancel != nil {
-		fmt.Println("Cancelling context...")
 		d.cancel()
 	}
 	fmt.Println("Shutdown complete")
