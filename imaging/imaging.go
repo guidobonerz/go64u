@@ -69,24 +69,43 @@ func WriteImage(data []byte, scaleFactor int, format ImageFormat) bool {
 }
 
 func GetImageFromBytes(data []byte, scaleFactor int) image.Image {
-	image := image.NewPaletted(image.Rect(0, 0, WIDTH, HEIGHT), util.GetPalette())
-	pixelIndex := 0
+	img := image.NewPaletted(image.Rect(0, 0, WIDTH, HEIGHT), util.GetPalette())
+	decodeInto(img, data)
 
+	if scaleFactor != 100 {
+		scaledWidth := float32(WIDTH) / float32(100) * float32(scaleFactor)
+		return resize.Resize(uint(scaledWidth), 0, img, resize.Bicubic)
+	}
+	return img
+}
+
+// ReusablePalettedImage is a pre-allocated paletted image for zero-alloc frame decoding.
+type ReusablePalettedImage struct {
+	img *image.Paletted
+}
+
+// NewReusablePalettedImage creates a reusable image buffer for stream decoding.
+func NewReusablePalettedImage() *ReusablePalettedImage {
+	return &ReusablePalettedImage{
+		img: image.NewPaletted(image.Rect(0, 0, WIDTH, HEIGHT), util.GetPalette()),
+	}
+}
+
+// Decode writes frame data into the reusable image and returns it. No allocation.
+func (r *ReusablePalettedImage) Decode(data []byte) *image.Paletted {
+	decodeInto(r.img, data)
+	return r.img
+}
+
+func decodeInto(img *image.Paletted, data []byte) {
+	pixelIndex := 0
 	for _, b := range data {
-		image.Pix[pixelIndex] = b & 0x0F
+		img.Pix[pixelIndex] = b & 0x0F
 		pixelIndex++
-		image.Pix[pixelIndex] = (b >> 4) & 0x0F
+		img.Pix[pixelIndex] = (b >> 4) & 0x0F
 		pixelIndex++
 		if pixelIndex >= SIZE {
 			break
 		}
-	}
-
-	if scaleFactor != 100 {
-		scaledWidth := float32(WIDTH) / float32(100) * float32(scaleFactor)
-		return resize.Resize(uint(scaledWidth), 0, image, resize.Bicubic)
-
-	} else {
-		return image
 	}
 }

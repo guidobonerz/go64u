@@ -18,3 +18,7 @@ func (d *ImageRenderer) Render(data []byte) bool {
 func (d *ImageRenderer) GetRunMode() RunMode {
 	return OneShot
 }
+
+func (d *ImageRenderer) GetFPS() int {
+	return 30
+}

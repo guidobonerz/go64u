@@ -13,10 +13,11 @@ import (
 
 type AudioReader struct {
 	Device       *config.Device
-	AudioContext *oto.Context              // set for local playback mode
+	AudioContext *oto.Context                 // set for local playback mode
 	Renderer     renderer.UpdateAudioSpectrum // optional spectrum callback
 	StopChan     <-chan struct{}
 	Muxer        *MkvMuxer // set for streaming mode — writes audio to Matroska muxer
+	RecordMuxer  *MkvMuxer // optional second muxer for dual-pipeline recording
 }
 
 func (ar *AudioReader) Read() {
@@ -41,6 +42,9 @@ func (ar *AudioReader) Read() {
 				return
 			}
 			ar.Muxer.WriteAudio(buffer[2:n])
+			if ar.RecordMuxer != nil {
+				ar.RecordMuxer.WriteAudio(buffer[2:n])
+			}
 		}
 	}
 
