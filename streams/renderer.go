@@ -12,6 +12,7 @@ const (
 type Renderer interface {
 	Init() error
 	GetRunMode() RunMode
+	GetFPS() int
 	Render(data []byte) bool
 	GetContext() context.Context
 }

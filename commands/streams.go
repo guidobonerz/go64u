@@ -78,11 +78,13 @@ func StreamCommand() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			target, _ := cmd.Flags().GetString("target")
 			record, _ := cmd.Flags().GetString("record")
-			StreamController(target, record)
+			noOverlay, _ := cmd.Flags().GetString("no-overlay")
+			StreamController(target, record, noOverlay)
 		},
 	}
 	cmd.Flags().String("target", "", "streaming platform (e.g. twitch, youtube)")
 	cmd.Flags().String("record", "", "record locally: audio, video, or both")
+	cmd.Flags().String("no-overlay", "", "disable overlay for: stream, record, or both")
 	return cmd
 }
 
@@ -129,7 +131,7 @@ func ScreenshotCommand() *cobra.Command {
 	return cmd
 }
 
-func StreamController(streamPlatformName string, record string) {
+func StreamController(streamPlatformName string, record string, noOverlay string) {
 	if streamPlatformName == "" && record == "" {
 		fmt.Println("Error: specify --target, --record, or both")
 		return
@@ -154,11 +156,12 @@ func StreamController(streamPlatformName string, record string) {
 
 	renderer := &streams.StreamRenderer{
 		ScaleFactor: 100,
-		Fps:         30,
+		Fps:         50,
 		Url:         url,
 		LogLevel:    config.GetConfig().LogLevel,
 		RecordPath:  recordPath,
 		RecordMode:  record,
+		NoOverlay: noOverlay,
 	}
 	videoReader := &streams.VideoReader{
 		Device:   device,
@@ -173,9 +176,10 @@ func StreamController(streamPlatformName string, record string) {
 	}
 
 	audioReader := &streams.AudioReader{
-		Device:   device,
-		StopChan: renderer.GetContext().Done(),
-		Muxer:    renderer.GetMuxer(),
+		Device:      device,
+		StopChan:    renderer.GetContext().Done(),
+		Muxer:       renderer.GetMuxer(),
+		RecordMuxer: renderer.GetRecordMuxer(),
 	}
 	go audioReader.Read()
 
