@@ -3,12 +3,19 @@ package streams
 import (
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"drazil.de/go64u/config"
 	"drazil.de/go64u/imaging"
 	"drazil.de/go64u/util"
 )
+
+var framePool = sync.Pool{
+	New: func() any {
+		return make([]byte, imaging.SIZE/2)
+	},
+}
 
 type VideoReader struct {
 	Device *config.Device
@@ -24,7 +31,7 @@ func (vr *VideoReader) Read() {
 	capture := false
 	imageData := make([]byte, imaging.SIZE/2)
 
-	frameChan := make(chan []byte, 3) // Buffer 3 frames to smooth out timing
+	frameChan := make(chan []byte, 8) // Buffer frames to absorb UDP timing jitter
 
 	go func() {
 		defer close(frameChan)
@@ -48,8 +55,9 @@ func (vr *VideoReader) Read() {
 			if linenumber&0x8000 == 0x8000 {
 
 				if capture && count == 68 {
-					frameCopy := make([]byte, offset)
-					copy(frameCopy, imageData[:offset])
+					frameCopy := framePool.Get().([]byte)
+					copy(frameCopy[:offset], imageData[:offset])
+					frameCopy = frameCopy[:offset]
 
 					frameNum++
 
@@ -110,7 +118,8 @@ func (vr *VideoReader) Read() {
 		return
 	}
 
-	ticker := time.NewTicker(time.Second / 30)
+	fps := vr.Renderer.GetFPS()
+	ticker := time.NewTicker(time.Second / time.Duration(fps))
 	defer ticker.Stop()
 
 	frameNumber := 0
@@ -130,19 +139,25 @@ func (vr *VideoReader) Read() {
 					fmt.Println("Frame channel closed, stopping")
 					return
 				}
+				// Return previously drained frame to pool
+				if latestFrame != nil {
+					framePool.Put(latestFrame[:cap(latestFrame)])
+				}
 				latestFrame = frame
 				gotFrame = true
 				drainCount++
-				//fmt.Printf("[Render Loop] Drained frame %d (%d bytes)\n", drainCount, len(frame))
 			default:
 				break drainLoop
 			}
 		}
 		if gotFrame {
 			if !vr.Renderer.Render(latestFrame) {
+				framePool.Put(latestFrame[:cap(latestFrame)])
 				fmt.Println("Render failed, stopping stream")
 				return
 			}
+			framePool.Put(latestFrame[:cap(latestFrame)])
+			latestFrame = nil
 			frameNumber++
 		}
 	}

@@ -2,6 +2,11 @@ package gui
 
 import (
 	"fmt"
+	"image"
+	"image/color"
+	"math"
+	"os"
+	"sort"
 	"sync"
 
 	"drazil.de/go64u/config"
@@ -9,251 +14,303 @@ import (
 	"drazil.de/go64u/streams"
 	"drazil.de/go64u/util"
 
+	"gioui.org/app"
+	"gioui.org/f32"
+	"gioui.org/font"
+	"gioui.org/font/opentype"
+	"gioui.org/layout"
+	"gioui.org/op"
+	"gioui.org/op/clip"
+	"gioui.org/op/paint"
+	"gioui.org/text"
+	"gioui.org/unit"
+	"gioui.org/widget"
+	"gioui.org/widget/material"
+
 	"github.com/ebitengine/oto/v3"
-	"github.com/richardwilkes/toolbox/v2/geom"
-	"github.com/richardwilkes/toolbox/v2/xos"
-	"github.com/richardwilkes/unison"
-	"github.com/richardwilkes/unison/enums/align"
-	"github.com/richardwilkes/unison/enums/paintstyle"
 )
 
-const playIcon = `<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
-<svg width="100%" height="100%" viewBox="0 0 150 150" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve" xmlns:serif="http://www.serif.com/" style="fill-rule:evenodd;clip-rule:evenodd;stroke-linejoin:round;stroke-miterlimit:2;">
-    <g transform="matrix(0.173272,0,0,0.173272,36.1881,30.6349)">
-        <path d="M424.4,214.7L72.4,6.6C43.8,-10.3 0,6.1 0,47.9L0,464C0,501.5 40.7,524.1 72.4,505.3L424.4,297.3C455.8,278.8 455.9,233.2 424.4,214.7Z" style="fill:rgb(103,255,69);fill-rule:nonzero;"/>
-    </g>
-</svg>`
-const stopIcon = `<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
-<svg width="100%" height="100%" viewBox="0 0 150 150" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve" xmlns:serif="http://www.serif.com/" style="fill-rule:evenodd;clip-rule:evenodd;stroke-linejoin:round;stroke-miterlimit:2;">
-    <g transform="matrix(0.198034,0,0,0.198034,30.6405,24.3034)">
-        <path d="M400,32L48,32C21.5,32 0,53.5 0,80L0,432C0,458.5 21.5,480 48,480L400,480C426.5,480 448,458.5 448,432L448,80C448,53.5 426.5,32 400,32Z" style="fill:rgb(254,0,0);fill-rule:nonzero;"/>
-    </g>
-</svg>`
-
-type startStream func(deviceName string)
-type stopStream func(deviceName string)
-type DrawingPanel struct {
-	unison.Panel
-	dataSourceName string
-	data           []byte
+type guiApp struct {
+	window  *app.Window
+	theme   *material.Theme
+	otoCtx  *oto.Context
+	devices []deviceUI
+	mu      sync.RWMutex
 }
 
-var images map[string]*DrawingPanel
+type deviceUI struct {
+	name        string
+	description string
+	device      *config.Device
+	toggle      widget.Clickable
+	active      bool
+	waveform    []byte
+}
 
-var synchronizer sync.RWMutex
-var otoCtx *oto.Context
-var fd unison.FontFaceDescriptor
+var (
+	colorBackground = color.NRGBA{R: 30, G: 30, B: 30, A: 255}
+	colorText       = color.NRGBA{R: 220, G: 220, B: 220, A: 255}
+	colorPlayIcon   = color.NRGBA{R: 103, G: 255, B: 69, A: 255}
+	colorStopIcon   = color.NRGBA{R: 254, G: 0, B: 0, A: 255}
+	colorWaveformBg = color.NRGBA{R: 55, G: 55, B: 55, A: 255}
+	colorWaveformFg = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+	colorSeparator  = color.NRGBA{R: 80, G: 80, B: 80, A: 255}
+)
 
 func Run() {
-	unison.Start(unison.StartupFinishedCallback(func() {
-		_, err := build(unison.PrimaryDisplay().Usable.Point)
-		xos.ExitIfErr(err)
-	}))
+	go func() {
+		a := newApp()
+		a.run()
+		os.Exit(0)
+	}()
+	app.Main()
 }
 
-func build(where geom.Point) (*unison.Window, error) {
-
-	images = make(map[string]*DrawingPanel)
-
+func newApp() *guiApp {
 	op := &oto.NewContextOptions{
 		SampleRate:   48000,
 		ChannelCount: 2,
 		Format:       oto.FormatSignedInt16LE,
 	}
-
-	var readyChan chan struct{}
-	var err error
-	otoCtx, readyChan, err = oto.NewContext(op)
+	otoCtx, readyChan, err := oto.NewContext(op)
 	if err != nil {
 		panic(err)
 	}
-
 	<-readyChan
 
-	wnd, err := unison.NewWindow("go64u - experimental gui")
-	if err != nil {
-		return nil, err
-	}
-	/*
-		fontData, err := os.ReadFile("./C64_Pro_Mono-STYLE.ttf")
-		if err != nil {
-			panic(err)
-		}
-	*/
-	customFontDescriptor, err := unison.RegisterFont(fonts.C64ProMonoSTYLE)
+	face, err := opentype.Parse(fonts.C64ProMonoSTYLE)
 	if err != nil {
 		panic(err)
 	}
-	fd = customFontDescriptor
-	unison.DefaultButtonTheme.Font = fd.Face().Font(16)
-	//unison.DefaultCheckBoxTheme.Font = fd.Face().Font(16)
-	unison.DefaultLabelTheme.Font = fd.Face().Font(16)
-	//unison.DefaultRadioButtonTheme.Font = fd.Face().Font(16)
+	fontFaces := []font.FontFace{{Font: face.Font(), Face: face}}
+	shaper := text.NewShaper(text.NoSystemFonts(), text.WithCollection(fontFaces))
 
-	content := wnd.Content()
+	th := material.NewTheme()
+	th.Shaper = shaper
+	th.TextSize = unit.Sp(16)
+	th.Palette.Fg = colorText
+	th.Palette.Bg = colorBackground
 
-	content.SetBorder(unison.NewEmptyBorder(geom.NewInsets(10, 10, 10, 10)))
-	content.SetLayout(&unison.FlexLayout{
-		Columns:  1,
-		HSpacing: unison.StdHSpacing,
-		VSpacing: 10,
-	})
+	devices := buildDeviceList()
 
-	var index = 0
-	for deviceName := range config.GetConfig().Devices {
-		device := config.GetConfig().Devices[deviceName]
-		panel := createControllerPanel(deviceName, device)
-		panel.SetLayoutData(&unison.FlexLayoutData{
-			VAlign: align.Middle,
-			HGrab:  false,
+	w := new(app.Window)
+	w.Option(app.Title("go64u - experimental gui"), app.Size(unit.Dp(500), unit.Dp(500)))
+
+	return &guiApp{
+		window:  w,
+		theme:   th,
+		otoCtx:  otoCtx,
+		devices: devices,
+	}
+}
+
+func buildDeviceList() []deviceUI {
+	cfg := config.GetConfig()
+	names := make([]string, 0, len(cfg.Devices))
+	for name := range cfg.Devices {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	devices := make([]deviceUI, 0, len(names))
+	for _, name := range names {
+		dev := cfg.Devices[name]
+		devices = append(devices, deviceUI{
+			name:        name,
+			description: dev.Description,
+			device:      dev,
 		})
-		content.AddChild(panel)
-		if index < len(config.GetConfig().Devices)-1 {
-			addSeparator(content)
-			index++
-		}
 	}
-
-	wnd.Pack()
-	rect := wnd.FrameRect()
-	rect.Point = where
-	rect.Width = 500
-	rect.Height = 500
-	wnd.SetFrameRect(rect)
-	wnd.ToFront()
-	return wnd, nil
+	return devices
 }
 
-func createToggleSVGButton(state1 *unison.SVG, state2 *unison.SVG, deviceName string, start startStream, stop stopStream) *unison.Panel {
-	active := false
+func (a *guiApp) run() {
+	var ops op.Ops
+	for {
+		switch e := a.window.Event().(type) {
+		case app.DestroyEvent:
+			return
+		case app.FrameEvent:
+			gtx := app.NewContext(&ops, e)
+			a.layoutRoot(gtx)
+			e.Frame(gtx.Ops)
+		}
+	}
+}
 
-	panel := unison.NewPanel()
-	panel.SetSizer(func(_ geom.Size) (minSize, prefSize, maxSize geom.Size) {
-		minSize.Width = 40
-		prefSize.Width = 40
-		maxSize.Width = 40
-		minSize.Height = 40
-		prefSize.Height = 40
-		maxSize.Height = 40
-		return minSize, prefSize, maxSize
+func (a *guiApp) layoutRoot(gtx layout.Context) layout.Dimensions {
+	// Dark background
+	defer clip.Rect{Max: gtx.Constraints.Max}.Push(gtx.Ops).Pop()
+	paint.Fill(gtx.Ops, colorBackground)
+
+	return layout.Inset{Top: 10, Bottom: 10, Left: 10, Right: 10}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		children := make([]layout.FlexChild, 0, len(a.devices)*2)
+		for i := range a.devices {
+			idx := i
+			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return a.layoutDevice(gtx, idx)
+			}))
+			if i < len(a.devices)-1 {
+				children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return a.layoutSeparator(gtx)
+				}))
+			}
+		}
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 	})
+}
 
-	currentSVG := state1
+func (a *guiApp) layoutDevice(gtx layout.Context, index int) layout.Dimensions {
+	dev := &a.devices[index]
 
-	panel.DrawCallback = func(gc *unison.Canvas, rect geom.Rect) {
-		currentSVG.DrawInRectPreservingAspectRatio(gc, rect, nil, nil)
-	}
-
-	panel.MouseDownCallback = func(where geom.Point, button, clickCount int, mod unison.Modifiers) bool {
-		active = !active
-		return true
-	}
-	panel.MouseUpCallback = func(where geom.Point, button int, mod unison.Modifiers) bool {
-		if active {
-			start(deviceName)
-			currentSVG = state2
+	if dev.toggle.Clicked(gtx) {
+		dev.active = !dev.active
+		if dev.active {
+			a.startAudio(dev)
 		} else {
-			stop(deviceName)
-			currentSVG = state1
+			a.stopAudio(dev)
 		}
-		panel.MarkForRedraw()
-		return true
 	}
-	return panel
+
+	return layout.Flex{
+		Axis:      layout.Horizontal,
+		Alignment: layout.Middle,
+	}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Right: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return a.layoutToggle(gtx, dev)
+			})
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Right: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return a.layoutWaveform(gtx, dev)
+			})
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			lbl := material.Label(a.theme, unit.Sp(16), dev.description)
+			return lbl.Layout(gtx)
+		}),
+	)
 }
 
-func addSeparator(parent *unison.Panel) {
-	sep := unison.NewSeparator()
-	sep.SetLayoutData(&unison.FlexLayoutData{
-		HAlign: align.Fill,
-		VAlign: align.Middle,
-	})
-	parent.AddChild(sep)
-}
+func (a *guiApp) layoutToggle(gtx layout.Context, dev *deviceUI) layout.Dimensions {
+	size := gtx.Dp(unit.Dp(40))
+	gtx.Constraints = layout.Exact(image.Pt(size, size))
 
-func createControllerPanel(deviceName string, device *config.Device) *unison.Panel {
-	panel := unison.NewPanel()
-	panel.SetLayout(&unison.FlexLayout{
-		Columns:      3,
-		EqualColumns: false,
-		HSpacing:     unison.StdHSpacing * 2,
-		VSpacing:     unison.StdVSpacing,
-	})
-	imagePanel := NewDrawingPanel(deviceName)
-	images[deviceName] = imagePanel
-	buttonPanel := createToggleSVGButton(unison.MustSVGFromContentString(playIcon), unison.MustSVGFromContentString(stopIcon), deviceName, func(deviceName string) {
-		device := config.GetConfig().Devices[deviceName]
-		device.AudioChannel = make(chan struct{})
-		streams.AudioStart(device)
-		audioReader := streams.AudioReader{
-			Device:       device,
-			AudioContext: otoCtx,
-			StopChan:     device.AudioChannel,
-			Renderer: func(data []byte) {
-				synchronizer.Lock()
-				panel := images[deviceName]
-				if panel != nil {
-					panel.data = data
-					panel.MarkForRedraw()
-				}
-				defer synchronizer.Unlock()
-			},
+	return dev.toggle.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		if dev.active {
+			drawStopIcon(gtx, size)
+		} else {
+			drawPlayIcon(gtx, size)
 		}
-		go audioReader.Read()
-		fmt.Printf("stream on %s started\n", deviceName)
-	}, func(deviceName string) {
-		device := config.GetConfig().Devices[deviceName]
-		if device.AudioChannel != nil {
-			fmt.Printf("stream on %s stopped\n", deviceName)
-			close(device.AudioChannel)
-			device.AudioChannel = nil
-		}
-		streams.AudioStop(device)
+		return layout.Dimensions{Size: image.Pt(size, size)}
 	})
-	panel.AddChild(buttonPanel)
-	panel.AddChild(imagePanel)
-	createLabel(device.Description, panel)
-	return panel
 }
 
-func createLabel(title string, parent *unison.Panel) *unison.Label {
-	label := unison.NewLabel()
-	label.SetTitle(title)
-	parent.AddChild(label)
-	return label
+func drawPlayIcon(gtx layout.Context, size int) {
+	// Draw a right-pointing triangle (play)
+	margin := float32(size) * 0.15
+	var path clip.Path
+	path.Begin(gtx.Ops)
+	path.MoveTo(f32.Pt(margin, margin))
+	path.LineTo(f32.Pt(float32(size)-margin, float32(size)/2))
+	path.LineTo(f32.Pt(margin, float32(size)-margin))
+	path.Close()
+	defer clip.Outline{Path: path.End()}.Op().Push(gtx.Ops).Pop()
+	paint.Fill(gtx.Ops, colorPlayIcon)
 }
 
-func NewDrawingPanel(dataSourcename string) *DrawingPanel {
-	p := &DrawingPanel{}
-	p.Self = p
-	p.dataSourceName = dataSourcename
-	p.SetSizer(func(_ geom.Size) (minSize, prefSize, maxSize geom.Size) {
-		prefSize = geom.Size{Width: 60, Height: 25}
-		return prefSize, prefSize, unison.MaxSize(prefSize)
-	})
-	p.DrawCallback = p.draw
-	return p
+func drawStopIcon(gtx layout.Context, size int) {
+	// Draw a rounded rectangle (stop)
+	margin := float32(size) * 0.15
+	r := float32(size) * 0.08
+	rect := clip.RRect{
+		Rect: image.Rect(int(margin), int(margin), size-int(margin), size-int(margin)),
+		SE:   int(r), SW: int(r), NE: int(r), NW: int(r),
+	}
+	defer rect.Push(gtx.Ops).Pop()
+	paint.Fill(gtx.Ops, colorStopIcon)
 }
 
-func (p *DrawingPanel) draw(gc *unison.Canvas, rect geom.Rect) {
+func (a *guiApp) layoutWaveform(gtx layout.Context, dev *deviceUI) layout.Dimensions {
+	w := gtx.Dp(unit.Dp(120))
+	h := gtx.Dp(unit.Dp(40))
+	sz := image.Pt(w, h)
+	gtx.Constraints = layout.Exact(sz)
 
-	paint := unison.NewPaint()
-	paint.SetColor(unison.ARGB(1, 55, 55, 55))
-	paint.SetStyle(paintstyle.Fill)
-	gc.DrawRect(rect, paint)
-	paint.SetColor(unison.ARGB(1, 255, 255, 255))
-	paint.SetStyle(paintstyle.Fill)
-	data := images[p.dataSourceName].data
+	// Background
+	defer clip.Rect{Max: sz}.Push(gtx.Ops).Pop()
+	paint.Fill(gtx.Ops, colorWaveformBg)
 
-	if data != nil {
-		var x float32 = 0
+	// Waveform
+	a.mu.RLock()
+	data := dev.waveform
+	a.mu.RUnlock()
+
+	if data != nil && len(data) > 8 {
+		halfH := float32(h) / 2
+		var path clip.Path
+		path.Begin(gtx.Ops)
+
+		first := true
+		var x float32
 		for i := 2; i < len(data)-4; i += 4 {
-			v1 := float32(12 - (float64(util.GetSingedWord(i, data))/32768.0)*12.5)
-			v2 := float32(12 - (float64(util.GetSingedWord(i+4, data))/32768.0)*12.5)
-			gc.DrawLine(geom.NewPoint(x, v1), geom.NewPoint(x+1, v2), paint)
+			v := halfH - (float32(util.GetSingedWord(i, data))/32768.0)*halfH
+			v = float32(math.Max(0, math.Min(float64(h), float64(v))))
+			if first {
+				path.MoveTo(f32.Pt(x, v))
+				first = false
+			} else {
+				path.LineTo(f32.Pt(x, v))
+			}
 			x += 1
+			if int(x) >= w {
+				break
+			}
 		}
+		spec := path.End()
+		defer clip.Stroke{Path: spec, Width: 1}.Op().Push(gtx.Ops).Pop()
+		paint.Fill(gtx.Ops, colorWaveformFg)
 	}
+
+	return layout.Dimensions{Size: sz}
+}
+
+func (a *guiApp) layoutSeparator(gtx layout.Context) layout.Dimensions {
+	height := gtx.Dp(unit.Dp(1))
+	width := gtx.Constraints.Max.X
+	sz := image.Pt(width, height)
+	inset := layout.Inset{Top: unit.Dp(5), Bottom: unit.Dp(5)}
+	return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		defer clip.Rect{Max: sz}.Push(gtx.Ops).Pop()
+		paint.Fill(gtx.Ops, colorSeparator)
+		return layout.Dimensions{Size: sz}
+	})
+}
+
+func (a *guiApp) startAudio(dev *deviceUI) {
+	dev.device.AudioChannel = make(chan struct{})
+	streams.AudioStart(dev.device)
+	audioReader := streams.AudioReader{
+		Device:       dev.device,
+		AudioContext: a.otoCtx,
+		StopChan:     dev.device.AudioChannel,
+		Renderer: func(data []byte) {
+			a.mu.Lock()
+			dev.waveform = data
+			a.mu.Unlock()
+			a.window.Invalidate()
+		},
+	}
+	go audioReader.Read()
+	fmt.Printf("stream on %s started\n", dev.name)
+}
+
+func (a *guiApp) stopAudio(dev *deviceUI) {
+	if dev.device.AudioChannel != nil {
+		fmt.Printf("stream on %s stopped\n", dev.name)
+		close(dev.device.AudioChannel)
+		dev.device.AudioChannel = nil
+	}
+	streams.AudioStop(dev.device)
 }
