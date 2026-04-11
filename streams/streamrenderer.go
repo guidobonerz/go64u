@@ -5,17 +5,14 @@ import (
 	"fmt"
 	"image"
 	"image/png"
-	"io"
 	"os"
-	"os/exec"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 
 	"drazil.de/go64u/config"
 	"drazil.de/go64u/imaging"
 )
-
-const debugMuxer = false
 
 const outputW = 1920
 const outputH = 1080
@@ -29,21 +26,21 @@ type StreamRenderer struct {
 	RecordMode     string // "audio", "video", or "both"
 	NoOverlay      string // disable overlay for: "stream", "record", or "both"
 	cancel         context.CancelFunc
-	stdin          io.WriteCloser
-	muxer          *MkvMuxer
-	cmd            *exec.Cmd
-	recordStdin    io.WriteCloser // separate recording pipeline (nil when not needed)
-	recordMuxer    *MkvMuxer      // separate recording muxer (nil when not needed)
-	recordCmd      *exec.Cmd      // separate recording FFmpeg (nil when not needed)
+	pipeline       *OutputPipeline
+	recordPipeline *OutputPipeline
 	ctx            context.Context
 	config         StreamConfig
 	frameCount     int
 	overlayImg     image.Image // loaded once in Init, nil if no overlay
-	bgraBuf        []byte      // reused BGRA output buffer (outputW*outputH*4)
+	bgraBuf        []byte      // reused BGRA output buffer
 	recordBuf      []byte      // reused BGRA buffer for clean recording frames (nil when not needed)
+	nativeBuf      bool        // true when bgraBuf is at native resolution (no overlay)
+	sigChan            chan os.Signal
 	dualPipeline       bool // true when stream and record have different overlay settings
 	streamWithOverlay  bool // whether the stream output gets the overlay
 	recordWithOverlay  bool // whether the record output gets the overlay
+	overlayEnabled     atomic.Bool // live toggle from GUI, read per-frame
+	forceKeyframe      atomic.Bool // request IDR on next frame after overlay toggle
 	zeroBuf            []byte      // pre-zeroed buffer for fast clear via copy()
 	paletteLUT         [16]bgraColor // pre-built BGRA lookup table for C64 palette
 	paletteLUTReady    bool
@@ -72,10 +69,10 @@ func (d *StreamRenderer) Init() error {
 	d.ctx = ctx
 	d.cancel = cancel
 
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	d.sigChan = make(chan os.Signal, 1)
+	signal.Notify(d.sigChan, os.Interrupt, syscall.SIGTERM)
 	go func() {
-		<-sigChan
+		<-d.sigChan
 		fmt.Println("\nReceived interrupt, stopping stream gracefully...")
 		d.Shutdown()
 	}()
@@ -97,13 +94,10 @@ func (d *StreamRenderer) Init() error {
 			return fmt.Errorf("failed to decode overlay PNG: %w", err)
 		}
 		d.overlayImg = img
-		fmt.Printf("✓ Overlay loaded: %s (%dx%d)\n", overlay.ImagePath,
+		fmt.Printf("Overlay loaded: %s (%dx%d)\n", overlay.ImagePath,
 			img.Bounds().Dx(), img.Bounds().Dy())
 	}
 
-	bufSize := outputW * outputH * 4
-	d.bgraBuf = make([]byte, bufSize)
-	d.zeroBuf = make([]byte, bufSize)
 	d.reusableImg = imaging.NewReusablePalettedImage()
 
 	hasStream := d.Url != ""
@@ -117,11 +111,25 @@ func (d *StreamRenderer) Init() error {
 		d.overlayImg = nil
 	}
 
-	d.streamWithOverlay = d.overlayImg != nil && !noOverlayStream
-	d.recordWithOverlay = d.overlayImg != nil && !noOverlayRecord
+	d.streamWithOverlay = d.overlayImg != nil && !noOverlayStream && hasStream
+	d.recordWithOverlay = d.overlayImg != nil && !noOverlayRecord && hasRecord
+	d.overlayEnabled.Store(d.streamWithOverlay || d.recordWithOverlay)
 
 	// Need dual pipeline when streaming + recording have different overlay settings
 	d.dualPipeline = hasStream && hasRecord && d.streamWithOverlay != d.recordWithOverlay
+
+	// Allocate BGRA buffers: native resolution when no overlay, full 1920x1080 when overlay.
+	// Native resolution is ~20x smaller (384x272 = 417KB vs 1920x1080 = 8MB).
+	anyOverlay := d.streamWithOverlay || d.recordWithOverlay
+	if anyOverlay {
+		bufSize := outputW * outputH * 4
+		d.bgraBuf = make([]byte, bufSize)
+		d.zeroBuf = make([]byte, bufSize)
+		d.nativeBuf = false
+	} else {
+		// Will be resized on first frame when we know the native dimensions
+		d.nativeBuf = true
+	}
 
 	if d.dualPipeline {
 		d.recordBuf = make([]byte, outputW*outputH*4)
@@ -134,74 +142,60 @@ func (d *StreamRenderer) Init() error {
 		}
 	}
 
-	fmt.Println("✓ Stream initialization complete")
+	fmt.Println("Stream initialization complete")
 	fmt.Println("Ready to receive frames...")
 	return nil
 }
 
-func (d *StreamRenderer) baseFFmpegArgs() []string {
-	return []string{
-		"-loglevel", d.LogLevel,
-		"-f", "matroska",
-		"-i", "pipe:0",
-		"-c:v", "libx264",
-		"-preset", "veryfast",
-		"-tune", "zerolatency",
-		"-b:v", d.config.Bitrate,
-		"-maxrate", d.config.Bitrate,
-		"-bufsize", "6000k",
-		"-pix_fmt", "yuv420p",
-		"-g", fmt.Sprintf("%d", d.config.FPS*2),
-		"-c:a", "aac",
-		"-b:a", "128k",
-		"-ar", "44100",
+func (d *StreamRenderer) srcDims(withOverlay bool) (int, int) {
+	if withOverlay {
+		return outputW, outputH // overlay needs full resolution
 	}
+	// 16:9 buffer at native height (272) to preserve aspect ratio.
+	// 272 * 16/9 = 483.6 → 484 (must be even for YUV420P).
+	// The 384px game image is centered with black bars on each side.
+	return 484, 272
 }
 
 func (d *StreamRenderer) initSinglePipeline(hasStream, hasRecord bool) error {
-	args := d.baseFFmpegArgs()
+	var err error
+	anyOverlay := d.streamWithOverlay || d.recordWithOverlay
+	srcW, srcH := d.srcDims(anyOverlay)
 
 	if hasStream && hasRecord {
 		fmt.Printf("Streaming to: %s\n", d.Url)
 		fmt.Printf("Recording to: %s (mode: %s)\n", d.RecordPath, d.RecordMode)
 
-		var recordOutput string
-		switch d.RecordMode {
-		case "audio":
-			recordOutput = "[f=mp4:select=\\'a\\']" + d.RecordPath
-		case "video":
-			recordOutput = "[f=mp4:select=\\'v\\']" + d.RecordPath
-		default:
-			recordOutput = "[f=mp4]" + d.RecordPath
+		d.pipeline, err = NewOutputPipeline(d.Url, "flv", d.config, "", srcW, srcH)
+		if err != nil {
+			return fmt.Errorf("failed to create stream pipeline: %w", err)
 		}
+		fmt.Println("Stream pipeline initialized")
 
-		args = append(args,
-			"-f", "tee",
-			"-map", "0:v", "-map", "0:a",
-			fmt.Sprintf("[f=flv]%s|%s", d.Url, recordOutput),
-		)
+		d.recordPipeline, err = NewOutputPipeline(d.RecordPath, "mp4", d.config, d.RecordMode, srcW, srcH)
+		if err != nil {
+			d.pipeline.Close()
+			return fmt.Errorf("failed to create record pipeline: %w", err)
+		}
+		fmt.Println("Record pipeline initialized")
 	} else if hasRecord {
 		fmt.Printf("Recording to: %s (mode: %s)\n", d.RecordPath, d.RecordMode)
 
-		switch d.RecordMode {
-		case "audio":
-			args = append(args, "-map", "0:a", "-f", "mp4", d.RecordPath)
-		case "video":
-			args = append(args, "-map", "0:v", "-an", "-f", "mp4", d.RecordPath)
-		default:
-			args = append(args, "-f", "mp4", d.RecordPath)
+		d.pipeline, err = NewOutputPipeline(d.RecordPath, "mp4", d.config, d.RecordMode, srcW, srcH)
+		if err != nil {
+			return fmt.Errorf("failed to create record pipeline: %w", err)
 		}
+		fmt.Println("Record pipeline initialized")
 	} else {
 		fmt.Printf("Streaming to: %s\n", d.Url)
-		args = append(args, "-f", "flv", d.Url)
+
+		d.pipeline, err = NewOutputPipeline(d.Url, "flv", d.config, "", srcW, srcH)
+		if err != nil {
+			return fmt.Errorf("failed to create stream pipeline: %w", err)
+		}
+		fmt.Println("Stream pipeline initialized")
 	}
 
-	var err error
-	d.cmd, d.stdin, d.muxer, err = d.startFFmpeg(args, "ffmpeg.log")
-	if err != nil {
-		return err
-	}
-	d.monitorFFmpeg(d.cmd)
 	return nil
 }
 
@@ -215,91 +209,23 @@ func (d *StreamRenderer) initDualPipeline() error {
 	fmt.Printf("Streaming to: %s (%s)\n", d.Url, overlayLabel(d.streamWithOverlay))
 	fmt.Printf("Recording to: %s (mode: %s, %s)\n", d.RecordPath, d.RecordMode, overlayLabel(d.recordWithOverlay))
 
-	// Stream pipeline (with overlay)
-	streamArgs := d.baseFFmpegArgs()
-	streamArgs = append(streamArgs, "-f", "flv", d.Url)
-
 	var err error
-	d.cmd, d.stdin, d.muxer, err = d.startFFmpeg(streamArgs, "ffmpeg_stream.log")
-	if err != nil {
-		return err
-	}
-	d.monitorFFmpeg(d.cmd)
 
-	// Record pipeline (without overlay)
-	recordArgs := d.baseFFmpegArgs()
-	switch d.RecordMode {
-	case "audio":
-		recordArgs = append(recordArgs, "-map", "0:a", "-f", "mp4", d.RecordPath)
-	case "video":
-		recordArgs = append(recordArgs, "-map", "0:v", "-an", "-f", "mp4", d.RecordPath)
-	default:
-		recordArgs = append(recordArgs, "-f", "mp4", d.RecordPath)
-	}
-
-	d.recordCmd, d.recordStdin, d.recordMuxer, err = d.startFFmpeg(recordArgs, "ffmpeg_record.log")
+	// Dual pipeline: both get full resolution since the overlay pipeline forces 1920x1080 buffers
+	d.pipeline, err = NewOutputPipeline(d.Url, "flv", d.config, "", outputW, outputH)
 	if err != nil {
-		d.stdin.Close()
-		d.cancel()
-		return err
+		return fmt.Errorf("failed to create stream pipeline: %w", err)
 	}
-	d.monitorFFmpeg(d.recordCmd)
+	fmt.Println("Stream pipeline initialized")
+
+	d.recordPipeline, err = NewOutputPipeline(d.RecordPath, "mp4", d.config, d.RecordMode, outputW, outputH)
+	if err != nil {
+		d.pipeline.Close()
+		return fmt.Errorf("failed to create record pipeline: %w", err)
+	}
+	fmt.Println("Record pipeline initialized")
 
 	return nil
-}
-
-func (d *StreamRenderer) startFFmpeg(args []string, logName string) (*exec.Cmd, io.WriteCloser, *MkvMuxer, error) {
-	cmd := exec.CommandContext(d.ctx, "ffmpeg", args...)
-
-	logFile, err := os.Create(logName)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to create log file %s: %w", logName, err)
-	}
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-	fmt.Printf("✓ FFmpeg log: %s\n", logName)
-
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to get stdin pipe: %w", err)
-	}
-
-	fmt.Println("Starting FFmpeg process...")
-	if err = cmd.Start(); err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to start ffmpeg: %w", err)
-	}
-	fmt.Println("✓ FFmpeg process started (PID:", cmd.Process.Pid, ")")
-
-	var muxWriter io.Writer = stdin
-	if debugMuxer {
-		debugFile, derr := os.Create("debug_" + logName + ".mkv")
-		if derr == nil {
-			fmt.Printf("✓ Debug file: debug_%s.mkv\n", logName)
-			muxWriter = io.MultiWriter(stdin, debugFile)
-		}
-	}
-	muxer, err := NewMkvMuxer(muxWriter, d.config.Width, d.config.Height, d.config.FPS, true)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to create muxer: %w", err)
-	}
-	fmt.Println("✓ Matroska muxer initialized")
-
-	return cmd, stdin, muxer, nil
-}
-
-func (d *StreamRenderer) monitorFFmpeg(cmd *exec.Cmd) {
-	go func() {
-		fmt.Printf("Monitoring FFmpeg process (PID: %d)...\n", cmd.Process.Pid)
-		err := cmd.Wait()
-		if err != nil {
-			fmt.Printf("\n!!! FFmpeg (PID: %d) exited with error: %v\n", cmd.Process.Pid, err)
-		} else {
-			fmt.Printf("\nFFmpeg (PID: %d) exited normally\n", cmd.Process.Pid)
-		}
-		if d.cancel != nil {
-			d.cancel()
-		}
-	}()
 }
 
 func (d *StreamRenderer) Render(data []byte) bool {
@@ -319,19 +245,50 @@ func (d *StreamRenderer) Render(data []byte) bool {
 		if d.frameCount == 1 {
 			bounds := img.Bounds()
 			fmt.Printf("[Frame %d] Image size: %dx%d\n", d.frameCount, bounds.Dx(), bounds.Dy())
+			// Lazy-alloc native buffer on first frame
+			if d.nativeBuf && d.bgraBuf == nil {
+				srcW, srcH := d.srcDims(false)
+				bufSize := srcW * srcH * 4
+				d.bgraBuf = make([]byte, bufSize)
+				d.zeroBuf = make([]byte, bufSize)
+				fmt.Printf("[Native mode] Buffer: %dx%d (%d bytes) -- swscale handles upscaling\n",
+					srcW, srcH, bufSize)
+			}
+		}
+
+		// Read overlay state once per frame (atomic, set by GUI thread)
+		useOverlay := d.overlayEnabled.Load()
+
+		// Force keyframe on overlay state change for clean scene transition
+		if d.forceKeyframe.CompareAndSwap(true, false) {
+			if d.pipeline != nil {
+				d.pipeline.RequestKeyframe()
+			}
+			if d.recordPipeline != nil {
+				d.recordPipeline.RequestKeyframe()
+			}
 		}
 
 		if d.dualPipeline {
-			// Record pipeline
-			d.composeFrameInto(d.recordBuf, img, d.recordWithOverlay)
-			d.recordMuxer.WriteVideoFrame(d.recordBuf)
+			d.composeFrameInto(d.recordBuf, img, useOverlay && d.recordWithOverlay)
+			if err := d.recordPipeline.EncodeVideoFrame(d.recordBuf); err != nil {
+				fmt.Printf("Record encode error: %v\n", err)
+			}
 
-			// Stream pipeline
-			d.composeFrameInto(d.bgraBuf, img, d.streamWithOverlay)
-			d.muxer.WriteVideoFrame(d.bgraBuf)
+			d.composeFrameInto(d.bgraBuf, img, useOverlay && d.streamWithOverlay)
+			if err := d.pipeline.EncodeVideoFrame(d.bgraBuf); err != nil {
+				fmt.Printf("Stream encode error: %v\n", err)
+			}
 		} else {
-			d.composeFrameInto(d.bgraBuf, img, d.streamWithOverlay || d.recordWithOverlay)
-			d.muxer.WriteVideoFrame(d.bgraBuf)
+			d.composeFrameInto(d.bgraBuf, img, useOverlay && (d.streamWithOverlay || d.recordWithOverlay))
+			if err := d.pipeline.EncodeVideoFrame(d.bgraBuf); err != nil {
+				fmt.Printf("Encode error: %v\n", err)
+			}
+			if d.recordPipeline != nil {
+				if err := d.recordPipeline.EncodeVideoFrame(d.bgraBuf); err != nil {
+					fmt.Printf("Record encode error: %v\n", err)
+				}
+			}
 		}
 
 		if d.frameCount%d.config.FPS == 0 {
@@ -344,12 +301,31 @@ func (d *StreamRenderer) Render(data []byte) bool {
 }
 
 func (d *StreamRenderer) composeFrameInto(buf []byte, gameImg image.Image, withOverlay bool) {
-	// Fast clear via copy from pre-zeroed buffer
-	copy(buf, d.zeroBuf)
-
 	bounds := gameImg.Bounds()
 	srcW := bounds.Dx()
 	srcH := bounds.Dy()
+
+	// Build palette LUT once (palette never changes across frames)
+	if pal, ok := gameImg.(*image.Paletted); ok && !d.paletteLUTReady {
+		for i, c := range pal.Palette {
+			if i >= 16 {
+				break
+			}
+			r, g, b, a := c.RGBA()
+			d.paletteLUT[i] = bgraColor{byte(b >> 8), byte(g >> 8), byte(r >> 8), byte(a >> 8)}
+		}
+		d.paletteLUTReady = true
+	}
+
+	// Native mode: no scaling, just palette->BGRA at native resolution.
+	// swscale handles upscaling to 1920x1080 in the encoder pipeline.
+	if d.nativeBuf && !withOverlay {
+		d.composeNative(buf, gameImg)
+		return
+	}
+
+	// Overlay/scaled mode: compose at 1920x1080
+	copy(buf, d.zeroBuf)
 
 	var dstX, dstY, dstW, dstH int
 
@@ -367,7 +343,6 @@ func (d *StreamRenderer) composeFrameInto(buf []byte, gameImg image.Image, withO
 		dstY = 0
 	}
 
-	// Clamp destination rect to buffer bounds
 	if dstX+dstW > outputW {
 		dstW = outputW - dstX
 	}
@@ -375,26 +350,13 @@ func (d *StreamRenderer) composeFrameInto(buf []byte, gameImg image.Image, withO
 		dstH = outputH - dstY
 	}
 
-	// Nearest-neighbor scale game directly into BGRA buffer
 	if pal, ok := gameImg.(*image.Paletted); ok {
-		// Build palette LUT once (palette never changes across frames)
-		if !d.paletteLUTReady {
-			for i, c := range pal.Palette {
-				if i >= 16 {
-					break
-				}
-				r, g, b, a := c.RGBA()
-				d.paletteLUT[i] = bgraColor{byte(b >> 8), byte(g >> 8), byte(r >> 8), byte(a >> 8)}
-			}
-			d.paletteLUTReady = true
-		}
 		lut := &d.paletteLUT
 		stride := pal.Stride
 		pix := pal.Pix
 		minX := bounds.Min.X
 		minY := bounds.Min.Y
 
-		// No per-pixel bounds check needed — dstW/dstH are clamped above
 		for y := 0; y < dstH; y++ {
 			srcY := y * srcH / dstH
 			rowOff := (dstY + y) * outputW * 4
@@ -410,7 +372,6 @@ func (d *StreamRenderer) composeFrameInto(buf []byte, gameImg image.Image, withO
 			}
 		}
 	} else {
-		// Generic fallback for non-paletted images
 		for y := 0; y < dstH; y++ {
 			srcY := y * srcH / dstH
 			rowOff := (dstY + y) * outputW * 4
@@ -429,6 +390,57 @@ func (d *StreamRenderer) composeFrameInto(buf []byte, gameImg image.Image, withO
 	// Draw overlay on top of the game
 	if withOverlay && d.overlayImg != nil {
 		blitToBGRA(buf, d.overlayImg, 0, 0, outputW, outputH, outputW)
+	}
+}
+
+// composeNative converts paletted image to BGRA at native resolution (no scaling).
+// swscale in the encoder pipeline handles upscaling to 1920x1080.
+// This is ~20x less data than composing at 1920x1080 (417KB vs 8MB).
+// composeNative converts paletted image to BGRA at native resolution, centered
+// in a 16:9 buffer (484x272) with black bars on the sides for correct aspect ratio.
+func (d *StreamRenderer) composeNative(buf []byte, gameImg image.Image) {
+	// Clear buffer (black bars)
+	copy(buf, d.zeroBuf)
+
+	bounds := gameImg.Bounds()
+	srcW := bounds.Dx()
+	srcH := bounds.Dy()
+
+	// Buffer width from srcDims (484 for 16:9 at height 272)
+	bufW := len(buf) / (srcH * 4)
+	dstX := (bufW - srcW) / 2 // center horizontally
+
+	if pal, ok := gameImg.(*image.Paletted); ok {
+		lut := &d.paletteLUT
+		stride := pal.Stride
+		pix := pal.Pix
+		minX := bounds.Min.X
+		minY := bounds.Min.Y
+
+		for y := 0; y < srcH; y++ {
+			srcRow := (minY+y)*stride + minX
+			rowOff := y * bufW * 4
+			for x := 0; x < srcW; x++ {
+				c := lut[pix[srcRow+x]]
+				off := rowOff + (dstX+x)*4
+				buf[off+0] = c.b
+				buf[off+1] = c.g
+				buf[off+2] = c.r
+				buf[off+3] = c.a
+			}
+		}
+	} else {
+		for y := 0; y < srcH; y++ {
+			rowOff := y * bufW * 4
+			for x := 0; x < srcW; x++ {
+				r, g, b, a := gameImg.At(bounds.Min.X+x, bounds.Min.Y+y).RGBA()
+				off := rowOff + (dstX+x)*4
+				buf[off+0] = byte(b >> 8)
+				buf[off+1] = byte(g >> 8)
+				buf[off+2] = byte(r >> 8)
+				buf[off+3] = byte(a >> 8)
+			}
+		}
 	}
 }
 
@@ -500,18 +512,16 @@ func blitToBGRA(buf []byte, img image.Image, dstX, dstY, dstW, dstH, stride int)
 }
 
 func (d *StreamRenderer) WriteAudio(data []byte) {
-	if d.muxer == nil {
-		return
+	if d.pipeline != nil {
+		if err := d.pipeline.EncodeAudio(data); err != nil {
+			fmt.Printf("Audio encode error: %v\n", err)
+		}
 	}
-	d.muxer.WriteAudio(data)
-}
-
-func (d *StreamRenderer) GetMuxer() *MkvMuxer {
-	return d.muxer
-}
-
-func (d *StreamRenderer) GetRecordMuxer() *MkvMuxer {
-	return d.recordMuxer
+	if d.recordPipeline != nil {
+		if err := d.recordPipeline.EncodeAudio(data); err != nil {
+			fmt.Printf("Record audio encode error: %v\n", err)
+		}
+	}
 }
 
 func (d *StreamRenderer) GetContext() context.Context {
@@ -520,28 +530,33 @@ func (d *StreamRenderer) GetContext() context.Context {
 
 func (d *StreamRenderer) Shutdown() {
 	fmt.Println("\n=== Shutting down stream ===")
-	if d.stdin != nil {
-		fmt.Println("Closing stream stdin pipe...")
-		d.stdin.Close()
-		d.stdin = nil
+	// Unregister signal handler so Ctrl+C returns to normal after stream stops
+	if d.sigChan != nil {
+		signal.Stop(d.sigChan)
 	}
-	if d.recordStdin != nil {
-		fmt.Println("Closing record stdin pipe...")
-		d.recordStdin.Close()
-		d.recordStdin = nil
-	}
-	if d.cmd != nil && d.cmd.Process != nil {
-		fmt.Println("Waiting for stream FFmpeg to finish...")
-		d.cmd.Wait()
-	}
-	if d.recordCmd != nil && d.recordCmd.Process != nil {
-		fmt.Println("Waiting for record FFmpeg to finish...")
-		d.recordCmd.Wait()
-	}
+	// Cancel context first so Render loop and AudioReader stop sending frames
 	if d.cancel != nil {
 		d.cancel()
 	}
+	if d.pipeline != nil {
+		fmt.Println("Closing stream pipeline...")
+		d.pipeline.Close()
+		d.pipeline = nil
+	}
+	if d.recordPipeline != nil {
+		fmt.Println("Closing record pipeline...")
+		d.recordPipeline.Close()
+		d.recordPipeline = nil
+	}
 	fmt.Println("Shutdown complete")
+}
+
+// SetOverlay toggles the overlay compositing at runtime.
+// Thread-safe — uses atomic flag, applied at next frame boundary.
+// Forces a keyframe on the next frame to prevent flicker during scene change.
+func (d *StreamRenderer) SetOverlay(enabled bool) {
+	d.overlayEnabled.Store(enabled && d.overlayImg != nil)
+	d.forceKeyframe.Store(true)
 }
 
 func (d *StreamRenderer) GetFPS() int {

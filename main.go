@@ -22,7 +22,12 @@ var rootCmd = &cobra.Command{
 
 		mode := 0
 		runInGuiMode, _ := cmd.Flags().GetBool("gui")
+		runInMonitorMode, _ := cmd.Flags().GetBool("monitor")
 		runInTerminalMode, _ := cmd.Flags().GetBool("terminal")
+
+		if runInMonitorMode {
+			runInGuiMode = true
+		}
 
 		if len(args) == 0 && !runInGuiMode && !runInTerminalMode {
 			cmd.Help()
@@ -42,7 +47,7 @@ var rootCmd = &cobra.Command{
 		}
 
 		if runInGuiMode {
-			gui.Run()
+			gui.Run(runInMonitorMode)
 		} else if runInTerminalMode {
 			terminal.Run()
 		}
@@ -53,6 +58,7 @@ func main() {
 
 	setup.Setup(rootCmd, false)
 	rootCmd.Flags().Bool("gui", false, "run the application in GUI(Graphics User Interface) mode")
+	rootCmd.Flags().Bool("monitor", false, "run GUI with video monitor (shows video stream when audio is playing)")
 	rootCmd.Flags().Bool("terminal", false, "run the application in terminal mode")
 	rootCmd.PersistentFlags().StringVarP(&config.GetConfig().SelectedDevice, "device", "d", config.GetConfig().SelectedDevice, "set device. needed in non terminal mode")
 	if err := rootCmd.Execute(); err != nil {

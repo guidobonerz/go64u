@@ -32,8 +32,6 @@ Some commands are only available in terminal mode
 ![Styled Directory](https://github.com/guidobonerz/go64u/blob/develop/doc/gui_streamplayer.png)
 
 ## Todo's
-* add gui frontend (currently available experimental, still buggy)
-* add streaming client for video (monitor mode)
 * list and change dir (local and remote)
 * disassembler with dialect option
 
@@ -83,7 +81,7 @@ go64u --terminal
 
 ### Option3 - GUI Mode
 
-go64u --gui
+go64u --monitor
 
 ## How to stream to twitch or other platforms
 start go64u in terminal mode : .\go64u.exe --terminal
