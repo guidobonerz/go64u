@@ -74,10 +74,12 @@ type deviceUI struct {
 var (
 	colorBackground = color.NRGBA{R: 30, G: 30, B: 30, A: 255}
 	colorText       = color.NRGBA{R: 220, G: 220, B: 220, A: 255}
-	colorActive     = color.NRGBA{R: 103, G: 255, B: 69, A: 255}
-	colorInactive   = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
-	colorToggleOff  = color.NRGBA{R: 120, G: 120, B: 120, A: 255}
-	colorStrike     = color.NRGBA{R: 254, G: 0, B: 0, A: 255}
+	colorActive      = color.NRGBA{R: 103, G: 255, B: 69, A: 255}
+	colorInactive    = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+	colorToggleOff   = color.NRGBA{R: 120, G: 120, B: 120, A: 255}
+	colorStrike      = color.NRGBA{R: 254, G: 0, B: 0, A: 255}
+	colorHoverWhite  = color.NRGBA{R: 150, G: 255, B: 130, A: 255} // light green hover for white icons
+	colorHoverGray   = color.NRGBA{R: 0, G: 160, B: 0, A: 255}    // dark green hover for gray icons
 	colorWaveformBg = color.NRGBA{R: 55, G: 55, B: 55, A: 255}
 	colorWaveformFg = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
 	colorSeparator  = color.NRGBA{R: 80, G: 80, B: 80, A: 255}
@@ -369,13 +371,22 @@ func (a *guiApp) layoutToggle(gtx layout.Context, dev *deviceUI) layout.Dimensio
 func (a *guiApp) layoutIconButton(gtx layout.Context, btn *widget.Clickable, active bool, streamActive bool, iconOn, iconOff *widget.Icon) layout.Dimensions {
 	size := gtx.Dp(unit.Dp(28))
 	gtx.Constraints = layout.Exact(image.Pt(size, size))
+	hovered := btn.Hovered()
 	return btn.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		if !streamActive {
 			iconOff.Layout(gtx, colorToggleOff)
 		} else if active {
-			iconOn.Layout(gtx, colorInactive)
+			if hovered {
+				iconOn.Layout(gtx, colorHoverWhite)
+			} else {
+				iconOn.Layout(gtx, colorInactive)
+			}
 		} else {
-			iconOff.Layout(gtx, colorToggleOff)
+			if hovered {
+				iconOff.Layout(gtx, colorHoverGray)
+			} else {
+				iconOff.Layout(gtx, colorToggleOff)
+			}
 		}
 		return layout.Dimensions{Size: image.Pt(size, size)}
 	})
@@ -545,6 +556,14 @@ func (a *guiApp) startVideo(dev *deviceUI) {
 
 			linenumber := util.GetWordFromArray(4, dataBuffer)
 
+			// Copy packet data first (bit-15 packet is LAST of current frame)
+			if capture && offset+len(dataBuffer[12:]) <= len(imgBuf) {
+				n := copy(imgBuf[offset:], dataBuffer[12:])
+				offset += n
+				count++
+			}
+
+			// Bit 15 = last packet of frame. Emit completed frame, start new one.
 			if linenumber&0x8000 == 0x8000 {
 				if capture && count == 68 {
 					// Decode paletted image and nearest-neighbor scale into NRGBA
@@ -583,7 +602,6 @@ func (a *guiApp) startVideo(dev *deviceUI) {
 						select {
 						case dev.rawFrameCh <- rawCopy:
 						default:
-							// drop if renderer can't keep up
 						}
 					}
 				}
@@ -591,12 +609,6 @@ func (a *guiApp) startVideo(dev *deviceUI) {
 				capture = true
 				count = 0
 				offset = 0
-			}
-
-			if capture && offset+len(dataBuffer[12:]) <= len(imgBuf) {
-				n := copy(imgBuf[offset:], dataBuffer[12:])
-				offset += n
-				count++
 			}
 		}
 	}()
@@ -642,9 +654,14 @@ func (a *guiApp) layoutSnapshotButton(gtx layout.Context, dev *deviceUI) layout.
 		}
 	}
 
+	hovered := dev.snapBtn.Hovered()
 	return dev.snapBtn.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		if dev.active {
-			iconCamera.Layout(gtx, colorInactive)
+			if hovered {
+				iconCamera.Layout(gtx, colorHoverWhite)
+			} else {
+				iconCamera.Layout(gtx, colorInactive)
+			}
 		} else {
 			iconCamera.Layout(gtx, colorToggleOff)
 		}
@@ -655,13 +672,22 @@ func (a *guiApp) layoutSnapshotButton(gtx layout.Context, dev *deviceUI) layout.
 func (a *guiApp) layoutCastButton(gtx layout.Context, dev *deviceUI) layout.Dimensions {
 	size := gtx.Dp(unit.Dp(28))
 	gtx.Constraints = layout.Exact(image.Pt(size, size))
+	hovered := dev.castBtn.Hovered()
 	return dev.castBtn.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		if !dev.active {
 			iconCast.Layout(gtx, colorToggleOff)
 		} else if dev.casting {
-			iconCast.Layout(gtx, colorInactive)
+			if hovered {
+				iconCast.Layout(gtx, colorHoverWhite)
+			} else {
+				iconCast.Layout(gtx, colorInactive)
+			}
 		} else {
-			iconCast.Layout(gtx, colorToggleOff)
+			if hovered {
+				iconCast.Layout(gtx, colorHoverGray)
+			} else {
+				iconCast.Layout(gtx, colorToggleOff)
+			}
 		}
 		return layout.Dimensions{Size: image.Pt(size, size)}
 	})
@@ -670,13 +696,18 @@ func (a *guiApp) layoutCastButton(gtx layout.Context, dev *deviceUI) layout.Dime
 func (a *guiApp) layoutRecordButton(gtx layout.Context, dev *deviceUI) layout.Dimensions {
 	size := gtx.Dp(unit.Dp(28))
 	gtx.Constraints = layout.Exact(image.Pt(size, size))
+	hovered := dev.recBtn.Hovered()
 	return dev.recBtn.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		if !dev.active {
 			iconRecord.Layout(gtx, colorToggleOff)
 		} else if dev.recording {
 			iconRecord.Layout(gtx, colorRecording)
 		} else {
-			iconRecord.Layout(gtx, colorInactive)
+			if hovered {
+				iconRecord.Layout(gtx, colorHoverWhite)
+			} else {
+				iconRecord.Layout(gtx, colorInactive)
+			}
 		}
 		return layout.Dimensions{Size: image.Pt(size, size)}
 	})

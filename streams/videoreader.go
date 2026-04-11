@@ -52,41 +52,10 @@ func (vr *VideoReader) Read() {
 
 			linenumber := util.GetWordFromArray(4, dataBuffer)
 
-			if linenumber&0x8000 == 0x8000 {
-
-				if capture && count == 68 {
-					frameCopy := framePool.Get().([]byte)
-					copy(frameCopy[:offset], imageData[:offset])
-					frameCopy = frameCopy[:offset]
-
-					frameNum++
-
-					select {
-					case frameChan <- frameCopy:
-						//fmt.Printf("[UDP] Frame %d sent to channel\n", frameNum)
-					default:
-						//fmt.Println("[UDP] Warning: Frame buffer full, dropping frame")
-					}
-				}
-
-				capture = true
-				count = 0
-				offset = 0
-
-				if offset+len(dataBuffer[12:]) <= len(imageData) {
-					n := copy(imageData[offset:], dataBuffer[12:])
-					offset += n
-					count++
-				}
-				continue
-			}
-
 			if capture {
-
 				if offset+len(dataBuffer[12:]) > len(imageData) {
 					fmt.Printf("[UDP] Buffer overflow: offset=%d, adding=%d, capacity=%d\n",
 						offset, len(dataBuffer[12:]), len(imageData))
-
 					count = 0
 					offset = 0
 					capture = false
@@ -96,6 +65,26 @@ func (vr *VideoReader) Read() {
 				n := copy(imageData[offset:], dataBuffer[12:])
 				offset += n
 				count++
+			}
+
+			// Bit 15 = last packet of the frame. Emit completed frame, then start new one.
+			if linenumber&0x8000 == 0x8000 {
+				if capture && count == 68 {
+					frameCopy := framePool.Get().([]byte)
+					copy(frameCopy[:offset], imageData[:offset])
+					frameCopy = frameCopy[:offset]
+
+					frameNum++
+
+					select {
+					case frameChan <- frameCopy:
+					default:
+					}
+				}
+
+				capture = true
+				count = 0
+				offset = 0
 			}
 		}
 
