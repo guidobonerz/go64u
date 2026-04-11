@@ -176,10 +176,9 @@ func StreamController(streamPlatformName string, record string, noOverlay string
 	}
 
 	audioReader := &streams.AudioReader{
-		Device:      device,
-		StopChan:    renderer.GetContext().Done(),
-		Muxer:       renderer.GetMuxer(),
-		RecordMuxer: renderer.GetRecordMuxer(),
+		Device:       device,
+		StopChan:     renderer.GetContext().Done(),
+		WriteAudioFn: renderer.WriteAudio,
 	}
 	go audioReader.Read()
 

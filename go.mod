@@ -18,6 +18,8 @@ require (
 
 require (
 	gioui.org/shader v1.0.8 // indirect
+	github.com/asticode/go-astiav v0.40.0 // indirect
+	github.com/asticode/go-astikit v0.42.0 // indirect
 	github.com/ebitengine/purego v0.9.1 // indirect
 	github.com/go-text/typesetting v0.3.0 // indirect
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
