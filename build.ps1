@@ -68,7 +68,7 @@ make install
     if (-not (Test-Path "$ffmpegPrefix\lib\libavcodec.a") -or -not (Test-Path "$ffmpegPrefix\lib\pkgconfig\libavcodec.pc")) {
         Write-Host "--- Building FFmpeg (static, minimal) ---" -ForegroundColor Green
         if (-not (Test-Path $ffmpegDir)) {
-            git clone --depth 1 --branch n7.1.1 https://github.com/FFmpeg/FFmpeg.git $ffmpegDir
+            git clone --depth 1 --branch master https://github.com/FFmpeg/FFmpeg.git $ffmpegDir
         }
         Push-Location $ffmpegDir
         & "$msys2\usr\bin\bash.exe" -c @"
@@ -79,7 +79,6 @@ cd '$($ffmpegDir -replace '\\','/')'
     --enable-gpl --enable-libx264 \
     --enable-static --disable-shared \
     --disable-programs --disable-doc \
-    --disable-avdevice --disable-avfilter --disable-postproc \
     --disable-network \
     --enable-protocol=file,pipe \
     --enable-encoder=libx264,aac \
