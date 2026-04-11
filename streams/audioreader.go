@@ -16,16 +16,15 @@ type AudioReader struct {
 	AudioContext *oto.Context                 // set for local playback mode
 	Renderer     renderer.UpdateAudioSpectrum // optional spectrum callback
 	StopChan     <-chan struct{}
-	Muxer        *MkvMuxer // set for streaming mode — writes audio to Matroska muxer
-	RecordMuxer  *MkvMuxer // optional second muxer for dual-pipeline recording
+	WriteAudioFn func(data []byte) // set for streaming mode — forwards audio to encoder pipeline
 }
 
 func (ar *AudioReader) Read() {
 	socket := ar.Device.AudioUdpConnection
 	buffer := make([]byte, 770)
 
-	// Streaming mode: just forward audio to the muxer, no oto playback
-	if ar.Muxer != nil {
+	// Streaming mode: just forward audio to the encoder pipeline, no oto playback
+	if ar.WriteAudioFn != nil {
 		for {
 			select {
 			case <-ar.StopChan:
@@ -41,10 +40,7 @@ func (ar *AudioReader) Read() {
 				log.Println("Audio stream UDP read error:", err)
 				return
 			}
-			ar.Muxer.WriteAudio(buffer[2:n])
-			if ar.RecordMuxer != nil {
-				ar.RecordMuxer.WriteAudio(buffer[2:n])
-			}
+			ar.WriteAudioFn(buffer[2:n])
 		}
 	}
 
