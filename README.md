@@ -25,11 +25,11 @@ Some commands are only available in terminal mode
 * stream (stream to your favourite platform, usually needs a streaming api key)
 
 ### Folder structure with icons
-![Styled Directory](https://github.com/guidobonerz/go64u/blob/develop/doc/list.png)
+![Styled Directory](https://github.com/guidobonerz/go64u/blob/main/doc/list.png)
 ### Audio Stream Player - Terminal
-![Styled Directory](https://github.com/guidobonerz/go64u/blob/develop/doc/streamplayer.png)
-### Audio Stream Player - GUI
-![Styled Directory](https://github.com/guidobonerz/go64u/blob/develop/doc/gui_streamplayer.png)
+![Styled Directory](https://github.com/guidobonerz/go64u/blob/main/doc/streamplayer.png)
+### Audio Stream Player - Monitor
+![Styled Directory](https://github.com/guidobonerz/go64u/blob/main/doc/gui_streamplayer.png)
 
 ## Todo's
 * list and change dir (local and remote)
