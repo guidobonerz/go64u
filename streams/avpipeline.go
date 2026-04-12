@@ -10,6 +10,14 @@ import (
 	"github.com/asticode/go-astiav"
 )
 
+// videoFrameMsg carries a BGRA frame buffer through the encoder channel
+// together with the wall-clock time it was captured at the source.
+// Capture-time PTS makes timestamps independent of pipeline jitter & drops.
+type videoFrameMsg struct {
+	buf         []byte
+	captureTime time.Time
+}
+
 // OutputPipeline encapsulates a complete astiav encoding+muxing pipeline
 // for one output destination (RTMP stream or MP4 file).
 type OutputPipeline struct {
@@ -28,9 +36,13 @@ type OutputPipeline struct {
 	swsCtx        *astiav.SoftwareScaleContext
 	swrCtx        *astiav.SoftwareResampleContext
 	audioFifo     *astiav.AudioFifo
-	muxMu         sync.Mutex // protects WriteInterleavedFrame
 	audioPts      int64
 	frameCount    int64
+
+	// Async muxing: encoded packets are queued for a dedicated muxer goroutine
+	// that handles the (potentially blocking) RTMP network write.
+	packetCh chan *astiav.Packet
+	muxDone  chan struct{}
 	startTime     time.Time // wall-clock start for PTS calculation
 	fps           int
 	lastVideoPts  int64 // ensures strictly monotonic PTS
@@ -42,8 +54,8 @@ type OutputPipeline struct {
 	height        int
 
 	// Async video encoding: frames are queued and encoded in a background goroutine
-	videoCh   chan []byte    // buffered channel of BGRA frame copies
-	videoDone chan struct{}  // closed when encode goroutine exits
+	videoCh   chan videoFrameMsg // buffered channel of BGRA frames + capture timestamps
+	videoDone chan struct{}      // closed when encode goroutine exits
 	bufPool   sync.Pool     // pool of []byte buffers to avoid GC pressure
 	closed        atomic.Bool // set when Close() is called; guards sends on videoCh
 	forceIDR      atomic.Bool // request keyframe on next encoded frame
@@ -111,11 +123,16 @@ func NewOutputPipeline(url, formatName string, cfg StreamConfig, recordMode stri
 	p.startTime = time.Now()
 	p.fps = cfg.FPS
 
+	// Start dedicated muxer goroutine (decouples encoding from network I/O)
+	p.packetCh = make(chan *astiav.Packet, 32) // ~0.6s buffer @ 50fps
+	p.muxDone = make(chan struct{})
+	go p.muxLoop()
+
 	// Start async video encoder goroutine
 	if p.hasVideo {
 		bufSize := p.srcWidth * p.srcHeight * 4
 		p.bufPool = sync.Pool{New: func() any { return make([]byte, bufSize) }}
-		p.videoCh = make(chan []byte, 8) // buffer up to 8 frames
+		p.videoCh = make(chan videoFrameMsg, 8) // buffer up to 8 frames
 		p.videoDone = make(chan struct{})
 		go p.videoEncodeLoop()
 	}
@@ -124,10 +141,21 @@ func NewOutputPipeline(url, formatName string, cfg StreamConfig, recordMode stri
 }
 
 func (p *OutputPipeline) initVideoEncoder(cfg StreamConfig, globalHeader bool) error {
-	codec := astiav.FindEncoderByName("libx264")
-	if codec == nil {
-		return fmt.Errorf("libx264 encoder not found")
+	// Try hardware encoders first (NVENC > QSV > AMF > x264 fallback)
+	var codec *astiav.Codec
+	encoderName := ""
+	for _, name := range []string{"h264_nvenc", "h264_qsv", "h264_amf", "libx264"} {
+		c := astiav.FindEncoderByName(name)
+		if c != nil {
+			codec = c
+			encoderName = name
+			break
+		}
 	}
+	if codec == nil {
+		return fmt.Errorf("no H.264 encoder found")
+	}
+	fmt.Printf("Using video encoder: %s\n", encoderName)
 
 	p.videoCodecCtx = astiav.AllocCodecContext(codec)
 	if p.videoCodecCtx == nil {
@@ -141,11 +169,15 @@ func (p *OutputPipeline) initVideoEncoder(cfg StreamConfig, globalHeader bool) e
 	p.videoCodecCtx.SetFramerate(astiav.NewRational(cfg.FPS, 1))
 	p.videoCodecCtx.SetBitRate(parseBitrate(cfg.Bitrate))
 	p.videoCodecCtx.SetRateControlMaxRate(parseBitrate(cfg.Bitrate))
-	p.videoCodecCtx.SetRateControlBufferSize(6000000)
+	p.videoCodecCtx.SetRateControlBufferSize(9000000)
 	p.videoCodecCtx.SetGopSize(cfg.FPS * 2)
 	p.videoCodecCtx.SetMaxBFrames(0)
-	p.videoCodecCtx.SetThreadCount(0)                            // auto-detect CPU cores
-	p.videoCodecCtx.SetThreadType(astiav.ThreadTypeSlice)        // slice threading = lower latency than frame threading
+
+	// Threading only relevant for software encoders
+	if encoderName == "libx264" {
+		p.videoCodecCtx.SetThreadCount(0)
+		p.videoCodecCtx.SetThreadType(astiav.ThreadTypeSlice)
+	}
 
 	if globalHeader {
 		p.videoCodecCtx.SetFlags(p.videoCodecCtx.Flags().Add(astiav.CodecContextFlagGlobalHeader))
@@ -153,11 +185,28 @@ func (p *OutputPipeline) initVideoEncoder(cfg StreamConfig, globalHeader bool) e
 
 	dict := astiav.NewDictionary()
 	defer dict.Free()
-	dict.Set("preset", "ultrafast", astiav.NewDictionaryFlags())
-	dict.Set("tune", "zerolatency", astiav.NewDictionaryFlags())
+	switch encoderName {
+	case "h264_nvenc":
+		// NVIDIA NVENC: low-latency CBR streaming preset
+		dict.Set("preset", "p4", astiav.NewDictionaryFlags()) // p1=fastest .. p7=slowest
+		dict.Set("tune", "ll", astiav.NewDictionaryFlags())   // low-latency
+		dict.Set("rc", "cbr", astiav.NewDictionaryFlags())
+		dict.Set("zerolatency", "1", astiav.NewDictionaryFlags())
+		dict.Set("delay", "0", astiav.NewDictionaryFlags())
+		dict.Set("profile", "main", astiav.NewDictionaryFlags())
+	case "h264_qsv":
+		dict.Set("preset", "veryfast", astiav.NewDictionaryFlags())
+		dict.Set("look_ahead", "0", astiav.NewDictionaryFlags())
+	case "h264_amf":
+		dict.Set("usage", "lowlatency", astiav.NewDictionaryFlags())
+		dict.Set("rc", "cbr", astiav.NewDictionaryFlags())
+	default: // libx264
+		dict.Set("preset", "veryfast", astiav.NewDictionaryFlags())
+		dict.Set("tune", "zerolatency", astiav.NewDictionaryFlags())
+	}
 
 	if err := p.videoCodecCtx.Open(codec, dict); err != nil {
-		return fmt.Errorf("open video codec: %w", err)
+		return fmt.Errorf("open video codec %s: %w", encoderName, err)
 	}
 
 	p.videoStream = p.formatCtx.NewStream(nil)
@@ -267,6 +316,37 @@ func (p *OutputPipeline) initAudioEncoder(globalHeader bool) error {
 	return nil
 }
 
+// muxLoop runs in a dedicated goroutine and writes encoded packets to the
+// output (file/RTMP). Decouples the encoder from network I/O -- if Twitch's
+// ingest server is slow, this goroutine blocks instead of the encoder.
+func (p *OutputPipeline) muxLoop() {
+	defer close(p.muxDone)
+	for pkt := range p.packetCh {
+		if err := p.formatCtx.WriteInterleavedFrame(pkt); err != nil {
+			fmt.Printf("mux: write packet: %v\n", err)
+		}
+		pkt.Free() // release cloned packet reference
+	}
+}
+
+// sendPacket clones the given packet and queues it for the muxer goroutine.
+// Blocks if the channel is full -- dropping packets (especially keyframes)
+// would cause severe visual stuttering until the next keyframe.
+func (p *OutputPipeline) sendPacket(pkt *astiav.Packet) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = nil // pipeline shutting down
+		}
+	}()
+
+	if p.closed.Load() {
+		return nil
+	}
+	cloned := pkt.Clone()
+	p.packetCh <- cloned
+	return nil
+}
+
 // videoEncodeLoop runs in a background goroutine. It reads BGRA frames from
 // the channel, encodes them, and writes packets to the muxer. This decouples
 // the render loop from the (potentially slow) x264 encoding, mirroring the
@@ -274,28 +354,28 @@ func (p *OutputPipeline) initAudioEncoder(globalHeader bool) error {
 func (p *OutputPipeline) videoEncodeLoop() {
 	defer close(p.videoDone)
 
-	for bgraData := range p.videoCh {
-		if err := p.srcFrame.Data().SetBytes(bgraData, 1); err != nil {
+	for msg := range p.videoCh {
+		if err := p.srcFrame.Data().SetBytes(msg.buf, 1); err != nil {
 			fmt.Printf("video encode: set bytes: %v\n", err)
-			p.bufPool.Put(bgraData)
+			p.bufPool.Put(msg.buf)
 			continue
 		}
 
 		// Return buffer to pool immediately after copy into AVFrame
-		p.bufPool.Put(bgraData)
+		p.bufPool.Put(msg.buf)
 
 		if err := p.swsCtx.ScaleFrame(p.srcFrame, p.videoFrame); err != nil {
 			fmt.Printf("video encode: scale: %v\n", err)
 			continue
 		}
 
-		// Wall-clock PTS: ensures timestamps match real time even if frames
-		// arrive in bursts. Prevents Twitch buffering from timestamp drift.
-		// Guarantee strictly monotonic increase (at least lastPTS+1).
-		elapsed := time.Since(p.startTime)
+		// Capture-time PTS: independent of pipeline jitter & frame drops.
+		// PTS reflects when the frame was actually captured at the source,
+		// not when the encoder happened to process it.
+		elapsed := msg.captureTime.Sub(p.startTime)
 		pts := elapsed.Nanoseconds() * int64(p.fps) / 1_000_000_000
 		if pts <= p.lastVideoPts {
-			pts = p.lastVideoPts + 1
+			pts = p.lastVideoPts + 1 // strict monotonic
 		}
 		p.lastVideoPts = pts
 		p.videoFrame.SetPts(pts)
@@ -326,7 +406,7 @@ func (p *OutputPipeline) RequestKeyframe() {
 	p.forceIDR.Store(true)
 }
 
-func (p *OutputPipeline) EncodeVideoFrame(bgraData []byte) (err error) {
+func (p *OutputPipeline) EncodeVideoFrame(bgraData []byte, captureTime time.Time) (err error) {
 	if !p.hasVideo || p.closed.Load() {
 		return nil
 	}
@@ -338,11 +418,15 @@ func (p *OutputPipeline) EncodeVideoFrame(bgraData []byte) (err error) {
 		}
 	}()
 
+	if captureTime.IsZero() {
+		captureTime = time.Now()
+	}
+
 	buf := p.bufPool.Get().([]byte)
 	copy(buf, bgraData)
 
 	select {
-	case p.videoCh <- buf:
+	case p.videoCh <- videoFrameMsg{buf: buf, captureTime: captureTime}:
 	default:
 		p.bufPool.Put(buf)
 	}
@@ -362,11 +446,8 @@ func (p *OutputPipeline) receiveVideoPackets() error {
 		p.videoPacket.SetStreamIndex(p.videoStream.Index())
 		p.videoPacket.RescaleTs(p.videoCodecCtx.TimeBase(), p.videoStream.TimeBase())
 
-		p.muxMu.Lock()
-		err = p.formatCtx.WriteInterleavedFrame(p.videoPacket)
-		p.muxMu.Unlock()
-		if err != nil {
-			return fmt.Errorf("write video packet: %w", err)
+		if err := p.sendPacket(p.videoPacket); err != nil {
+			return fmt.Errorf("queue video packet: %w", err)
 		}
 	}
 }
@@ -442,40 +523,48 @@ func (p *OutputPipeline) receiveAudioPackets() error {
 		p.audioPacket.SetStreamIndex(p.audioStream.Index())
 		p.audioPacket.RescaleTs(p.audioCodecCtx.TimeBase(), p.audioStream.TimeBase())
 
-		p.muxMu.Lock()
-		err = p.formatCtx.WriteInterleavedFrame(p.audioPacket)
-		p.muxMu.Unlock()
-		if err != nil {
-			return fmt.Errorf("write audio packet: %w", err)
+		if err := p.sendPacket(p.audioPacket); err != nil {
+			return fmt.Errorf("queue audio packet: %w", err)
 		}
 	}
 }
 
 func (p *OutputPipeline) Close() error {
+	// Stop accepting new input frames (EncodeVideoFrame/EncodeAudio will return).
+	// The muxer goroutine is still allowed to receive flush packets below.
 	p.closed.Store(true)
 
-	// Signal video goroutine to stop and wait
+	// 1. Stop video encoder goroutine (drains videoCh)
 	if p.videoCh != nil {
 		close(p.videoCh)
 		<-p.videoDone
 	}
 
-	// Flush video encoder
+	// 2. Flush encoders -- produces final packets that still need to pass
+	//    through packetCh to the muxer goroutine. sendPacket checks closed,
+	//    so we need to allow sends during flush: temporarily re-enable.
+	p.closed.Store(false)
 	if p.videoCodecCtx != nil {
 		p.videoCodecCtx.SendFrame(nil)
 		if p.videoPacket != nil {
 			p.receiveVideoPackets()
 		}
 	}
-
-	// Flush audio encoder
 	if p.audioCodecCtx != nil {
 		p.audioCodecCtx.SendFrame(nil)
 		if p.audioPacket != nil {
 			p.receiveAudioPackets()
 		}
 	}
+	p.closed.Store(true)
 
+	// 3. Close packet channel and wait for muxer goroutine to drain
+	if p.packetCh != nil {
+		close(p.packetCh)
+		<-p.muxDone
+	}
+
+	// 4. Write trailer (muxer finished, safe to finalize output)
 	if p.formatCtx != nil && p.headerWritten {
 		p.formatCtx.WriteTrailer()
 	}

@@ -28,7 +28,7 @@ Some commands are only available in terminal mode
 ![Styled Directory](https://github.com/guidobonerz/go64u/blob/main/doc/list.png)
 ### Audio Stream Player - Terminal
 ![Styled Directory](https://github.com/guidobonerz/go64u/blob/main/doc/streamplayer.png)
-### Audio Stream Player - Monitor
+### Stream Player - Monitor
 ![Styled Directory](https://github.com/guidobonerz/go64u/blob/main/doc/gui_streamplayer.png)
 
 ## Todo's
