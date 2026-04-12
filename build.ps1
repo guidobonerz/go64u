@@ -37,6 +37,29 @@ if ($static) {
 
     if (-not (Test-Path $ffmpegBuild)) { New-Item -ItemType Directory -Path $ffmpegBuild | Out-Null }
 
+    # --- Install nv-codec-headers (NVENC headers, no CUDA SDK needed) ---
+    $nvHeadersDir = "$ffmpegBuild\nv-codec-headers"
+    if (-not (Test-Path "$ffmpegPrefix\include\ffnvcodec\nvEncodeAPI.h")) {
+        Write-Host "--- Installing nv-codec-headers ---" -ForegroundColor Green
+        if (-not (Test-Path $nvHeadersDir)) {
+            git clone --depth 1 https://github.com/FFmpeg/nv-codec-headers.git $nvHeadersDir
+        }
+        Push-Location $nvHeadersDir
+        & "$msys2\usr\bin\bash.exe" -c @"
+export PATH='/mingw64/bin:/c/Users/guido/applications/mingw64/bin:/usr/bin:`$PATH'
+cd '$($nvHeadersDir -replace '\\','/')'
+make PREFIX='$($ffmpegPrefix -replace '\\','/')' install
+"@
+        Pop-Location
+        if (-not (Test-Path "$ffmpegPrefix\include\ffnvcodec\nvEncodeAPI.h")) {
+            Write-Error "nv-codec-headers install failed"
+            exit 1
+        }
+        Write-Host "nv-codec-headers installed" -ForegroundColor Green
+    } else {
+        Write-Host "nv-codec-headers already installed, skipping" -ForegroundColor DarkGray
+    }
+
     # --- Build x264 static ---
     $x264Dir = "$ffmpegBuild\x264"
     if (-not (Test-Path "$x264Prefix\lib\libx264.a")) {
@@ -73,21 +96,21 @@ make install
         Push-Location $ffmpegDir
         & "$msys2\usr\bin\bash.exe" -c @"
 export PATH='/mingw64/bin:/c/Users/guido/applications/mingw64/bin:/usr/bin:`$PATH'
-export PKG_CONFIG_PATH='$($x264Prefix -replace '\\','/')/lib/pkgconfig'
+export PKG_CONFIG_PATH='$($ffmpegPrefix -replace '\\','/')/lib/pkgconfig'
 cd '$($ffmpegDir -replace '\\','/')'
 ./configure --prefix='$($ffmpegPrefix -replace '\\','/')' \
     --enable-gpl --enable-libx264 \
+    --enable-nvenc --enable-ffnvcodec \
     --enable-static --disable-shared \
     --disable-programs --disable-doc \
-    --disable-network \
-    --enable-protocol=file,pipe \
-    --enable-encoder=libx264,aac \
+    --enable-protocol=file,pipe,tcp,rtmp \
+    --enable-encoder=libx264,h264_nvenc,aac \
     --enable-decoder=rawvideo,pcm_s16le \
     --enable-muxer=flv,mp4,matroska \
     --enable-demuxer=rawvideo \
     --enable-swscale --enable-swresample \
-    --extra-cflags='-I$($x264Prefix -replace '\\','/')/include' \
-    --extra-ldflags='-L$($x264Prefix -replace '\\','/')/lib' \
+    --extra-cflags='-I$($ffmpegPrefix -replace '\\','/')/include' \
+    --extra-ldflags='-L$($ffmpegPrefix -replace '\\','/')/lib' \
     --arch=x86_64 \
     --target-os=mingw64
 make -j$env:NUMBER_OF_PROCESSORS
@@ -117,6 +140,10 @@ make install
     go build -trimpath -ldflags "-w -s -extldflags '-static'" -o "$moduleName.exe" main.go
 
     if ($LASTEXITCODE -eq 0) {
+        if ($p) {
+            Write-Host "Compressing with UPX..." -ForegroundColor Cyan
+            upx --best "$moduleName.exe"
+        }
         $size = [math]::Round((Get-Item "$moduleName.exe").Length / 1MB, 1)
         Write-Host "=== Build successful: $moduleName.exe ($size MB, static) ===" -ForegroundColor Green
         # Verify no DLL dependencies from MSYS2

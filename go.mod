@@ -5,6 +5,7 @@ go 1.25.5
 require (
 	drazil.de/cmm v0.0.0
 	gioui.org v0.9.0
+	github.com/asticode/go-astiav v0.40.0
 	github.com/dustin/go-humanize v1.0.1
 	github.com/ebitengine/oto/v3 v3.4.0
 	github.com/fogleman/gg v1.3.0
@@ -13,12 +14,12 @@ require (
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
+	golang.org/x/exp/shiny v0.0.0-20250408133849-7e4ce0ab07d0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
 	gioui.org/shader v1.0.8 // indirect
-	github.com/asticode/go-astiav v0.40.0 // indirect
 	github.com/asticode/go-astikit v0.42.0 // indirect
 	github.com/ebitengine/purego v0.9.1 // indirect
 	github.com/go-text/typesetting v0.3.0 // indirect
@@ -29,7 +30,6 @@ require (
 	github.com/kr/pretty v0.3.0 // indirect
 	github.com/rogpeppe/go-internal v1.8.0 // indirect
 	github.com/soniakeys/quant v1.0.0 // indirect
-	golang.org/x/exp/shiny v0.0.0-20250408133849-7e4ce0ab07d0 // indirect
 	golang.org/x/image v0.34.0 // indirect
 	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/text v0.32.0 // indirect
