@@ -8,9 +8,9 @@ import (
 	"math"
 	"net"
 	"os"
-	"time"
 	"sort"
 	"sync"
+	"time"
 
 	"drazil.de/go64u/config"
 	"drazil.de/go64u/fonts"
@@ -45,56 +45,61 @@ type guiApp struct {
 }
 
 type deviceUI struct {
-	name          string
-	description   string
-	device        *config.Device
-	toggle        widget.Clickable
-	active        bool
-	waveform      []byte
-	videoFrame    *image.NRGBA   // current video frame for monitor display
-	videoActive   bool           // true when video stream is running
-	audioPlaying  bool           // true when audio reader is running
-	audioStopCh   chan struct{}  // stop channel for audio reader (independent of device channel)
-	audioMonitor  bool          // audio monitoring enabled
-	videoMonitor  bool          // video monitoring enabled
-	recording     bool          // true when recording to file
-	casting       bool          // true when streaming to platform
-	overlayOn     bool          // overlay enabled for recording/casting
-	recRenderer   *streams.StreamRenderer
-	castRenderer  *streams.StreamRenderer
-	rawFrameCh    chan []byte   // channel for feeding raw frames to cast/rec renderers
-	audioBtn      widget.Clickable
-	videoBtn      widget.Clickable
-	recBtn        widget.Clickable
-	castBtn       widget.Clickable
-	overlayBtn    widget.Clickable
-	snapBtn       widget.Clickable
+	name         string
+	description  string
+	device       *config.Device
+	toggle       widget.Clickable
+	active       bool
+	waveform     []byte
+	videoFrame   *image.NRGBA  // current video frame for monitor display
+	videoActive  bool          // true when video stream is running
+	audioPlaying bool          // true when audio reader is running
+	audioStopCh  chan struct{} // stop channel for audio reader (independent of device channel)
+	audioMonitor bool          // audio monitoring enabled
+	videoMonitor bool          // video monitoring enabled
+	recording    bool          // true when recording to file
+	casting      bool          // true when streaming to platform
+	overlayOn    bool          // overlay enabled for recording/casting
+	crtOn        bool          // CRT monitor style enabled
+	recRenderer  *streams.StreamRenderer
+	castRenderer *streams.StreamRenderer
+	rawFrameCh   chan []byte // channel for feeding raw frames to cast/rec renderers
+	audioBtn     widget.Clickable
+	videoBtn     widget.Clickable
+	recBtn       widget.Clickable
+	castBtn      widget.Clickable
+	overlayBtn   widget.Clickable
+	snapBtn      widget.Clickable
+	crtBtn       widget.Clickable
 }
 
 var (
 	colorBackground = color.NRGBA{R: 30, G: 30, B: 30, A: 255}
 	colorText       = color.NRGBA{R: 220, G: 220, B: 220, A: 255}
-	colorActive      = color.NRGBA{R: 103, G: 255, B: 69, A: 255}
-	colorInactive    = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
-	colorToggleOff   = color.NRGBA{R: 120, G: 120, B: 120, A: 255}
-	colorStrike      = color.NRGBA{R: 254, G: 0, B: 0, A: 255}
-	colorHoverWhite  = color.NRGBA{R: 150, G: 255, B: 130, A: 255} // light green hover for white icons
-	colorHoverGray   = color.NRGBA{R: 0, G: 160, B: 0, A: 255}    // dark green hover for gray icons
+	colorActive     = color.NRGBA{R: 103, G: 255, B: 69, A: 255}
+	colorInactive   = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+	colorToggleOff  = color.NRGBA{R: 120, G: 120, B: 120, A: 255}
+	colorStrike     = color.NRGBA{R: 254, G: 0, B: 0, A: 255}
+	colorHoverWhite = color.NRGBA{R: 150, G: 255, B: 130, A: 255} // light green hover for white icons
+	colorHoverGray  = color.NRGBA{R: 0, G: 160, B: 0, A: 255}     // dark green hover for gray icons
 	colorWaveformBg = color.NRGBA{R: 55, G: 55, B: 55, A: 255}
 	colorWaveformFg = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
 	colorSeparator  = color.NRGBA{R: 80, G: 80, B: 80, A: 255}
 
-	iconPlay, _       = widget.NewIcon(icons.AVPlayArrow)
-	iconStop, _       = widget.NewIcon(icons.AVStop)
-	iconMusic, _      = widget.NewIcon(icons.AVMusicVideo)
-	iconEye, _        = widget.NewIcon(icons.ActionVisibility)
-	iconEyeOff, _     = widget.NewIcon(icons.ActionVisibilityOff)
-	iconRecord, _     = widget.NewIcon(icons.AVFiberManualRecord)
-	iconCast, _       = widget.NewIcon(icons.HardwareCast)
-	iconOverlay, _    = widget.NewIcon(icons.MapsLayers)
-	iconOverlayOff, _ = widget.NewIcon(icons.MapsLayersClear)
-	iconCamera, _     = widget.NewIcon(icons.ImagePhotoCamera)
-	colorRecording    = color.NRGBA{R: 255, G: 40, B: 40, A: 255}
+	iconPlay, _          = widget.NewIcon(icons.AVPlayArrow)
+	iconStop, _          = widget.NewIcon(icons.AVStop)
+	iconMusic, _         = widget.NewIcon(icons.AVVolumeUp)
+	iconMute, _          = widget.NewIcon(icons.AVVolumeOff)
+	iconEye, _           = widget.NewIcon(icons.ActionVisibility)
+	iconEyeOff, _        = widget.NewIcon(icons.ActionVisibilityOff)
+	iconRecord, _        = widget.NewIcon(icons.AVFiberManualRecord)
+	iconCast, _          = widget.NewIcon(icons.HardwareCast)
+	iconCastConnected, _ = widget.NewIcon(icons.HardwareCastConnected)
+	iconOverlay, _       = widget.NewIcon(icons.MapsLayers)
+	iconOverlayOff, _    = widget.NewIcon(icons.MapsLayersClear)
+	iconCamera, _        = widget.NewIcon(icons.ImagePhotoCamera)
+	iconCrt, _           = widget.NewIcon(icons.HardwareTV)
+	colorRecording       = color.NRGBA{R: 255, G: 40, B: 40, A: 255}
 )
 
 func Run(monitor bool) {
@@ -133,12 +138,10 @@ func newApp(monitor bool) *guiApp {
 
 	devices := buildDeviceList()
 	hasOverlay := config.GetConfig().Overlay.ImagePath != ""
-	if monitor {
-		for i := range devices {
-			devices[i].audioMonitor = true
-			devices[i].videoMonitor = true
-			devices[i].overlayOn = hasOverlay
-		}
+	for i := range devices {
+		devices[i].audioMonitor = true
+		devices[i].videoMonitor = true
+		devices[i].overlayOn = hasOverlay
 	}
 
 	w := new(app.Window)
@@ -264,6 +267,15 @@ func (a *guiApp) layoutDevice(gtx layout.Context, index int) layout.Dimensions {
 				}
 			}
 		}
+		if dev.crtBtn.Clicked(gtx) {
+			dev.crtOn = !dev.crtOn
+			if dev.castRenderer != nil {
+				dev.castRenderer.SetCrt(dev.crtOn)
+			}
+			if dev.recRenderer != nil {
+				dev.recRenderer.SetCrt(dev.crtOn)
+			}
+		}
 		if dev.overlayBtn.Clicked(gtx) {
 			dev.overlayOn = !dev.overlayOn
 			// Apply to running cast/recording in real-time
@@ -315,7 +327,7 @@ func (a *guiApp) layoutDevice(gtx layout.Context, index int) layout.Dimensions {
 			return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return a.layoutIconButton(gtx, &dev.audioBtn, dev.audioMonitor, dev.active, iconMusic, iconMusic)
+						return a.layoutIconButton(gtx, &dev.audioBtn, dev.audioMonitor, dev.active, iconMusic, iconMute)
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return layout.Inset{Left: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -340,6 +352,11 @@ func (a *guiApp) layoutDevice(gtx layout.Context, index int) layout.Dimensions {
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return layout.Inset{Left: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 							return a.layoutIconButton(gtx, &dev.overlayBtn, dev.overlayOn, dev.active, iconOverlay, iconOverlayOff)
+						})
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return layout.Inset{Left: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return a.layoutIconButton(gtx, &dev.crtBtn, dev.crtOn, dev.active, iconCrt, iconCrt)
 						})
 					}),
 				)
@@ -393,8 +410,9 @@ func (a *guiApp) layoutIconButton(gtx layout.Context, btn *widget.Clickable, act
 }
 
 func (a *guiApp) layoutWaveform(gtx layout.Context, dev *deviceUI) layout.Dimensions {
-	w := gtx.Dp(unit.Dp(120))
+	w := gtx.Dp(unit.Dp(140))
 	h := gtx.Dp(unit.Dp(40))
+	gap := gtx.Dp(unit.Dp(4))
 	sz := image.Pt(w, h)
 	gtx.Constraints = layout.Exact(sz)
 
@@ -402,35 +420,64 @@ func (a *guiApp) layoutWaveform(gtx layout.Context, dev *deviceUI) layout.Dimens
 	defer clip.Rect{Max: sz}.Push(gtx.Ops).Pop()
 	paint.Fill(gtx.Ops, colorWaveformBg)
 
-	// Waveform
 	a.mu.RLock()
 	data := dev.waveform
 	a.mu.RUnlock()
 
-	if data != nil && len(data) > 8 {
+	if len(data) > 8 {
 		halfH := float32(h) / 2
-		var path clip.Path
-		path.Begin(gtx.Ops)
+		channelW := (w - gap) / 2
 
+		// Build left channel path first
+		var pathLeft clip.Path
+		pathLeft.Begin(gtx.Ops)
 		first := true
 		var x float32
 		for i := 2; i < len(data)-4; i += 4 {
 			v := halfH - (float32(util.GetSingedWord(i, data))/32768.0)*halfH
 			v = float32(math.Max(0, math.Min(float64(h), float64(v))))
 			if first {
-				path.MoveTo(f32.Pt(x, v))
+				pathLeft.MoveTo(f32.Pt(x, v))
 				first = false
 			} else {
-				path.LineTo(f32.Pt(x, v))
+				pathLeft.LineTo(f32.Pt(x, v))
 			}
 			x += 1
-			if int(x) >= w {
+			if int(x) >= channelW {
 				break
 			}
 		}
-		spec := path.End()
-		defer clip.Stroke{Path: spec, Width: 1}.Op().Push(gtx.Ops).Pop()
-		paint.Fill(gtx.Ops, colorWaveformFg)
+		specLeft := pathLeft.End()
+		func() {
+			defer clip.Stroke{Path: specLeft, Width: 1}.Op().Push(gtx.Ops).Pop()
+			paint.Fill(gtx.Ops, colorWaveformFg)
+		}()
+
+		// Build right channel path
+		var pathRight clip.Path
+		pathRight.Begin(gtx.Ops)
+		first = true
+		x = 0
+		offsetX := float32(channelW + gap)
+		for i := 4; i < len(data)-4; i += 4 {
+			v := halfH - (float32(util.GetSingedWord(i, data))/32768.0)*halfH
+			v = float32(math.Max(0, math.Min(float64(h), float64(v))))
+			if first {
+				pathRight.MoveTo(f32.Pt(offsetX+x, v))
+				first = false
+			} else {
+				pathRight.LineTo(f32.Pt(offsetX+x, v))
+			}
+			x += 1
+			if int(x) >= channelW {
+				break
+			}
+		}
+		specRight := pathRight.End()
+		func() {
+			defer clip.Stroke{Path: specRight, Width: 1}.Op().Push(gtx.Ops).Pop()
+			paint.Fill(gtx.Ops, colorWaveformFg)
+		}()
 	}
 
 	return layout.Dimensions{Size: sz}
@@ -573,17 +620,48 @@ func (a *guiApp) startVideo(dev *deviceUI) {
 					dstStride := nrgbaFrame.Stride
 					dstPix := nrgbaFrame.Pix
 
-					for y := 0; y < imaging.HEIGHT; y++ {
+					// Only show local scanlines in single-display mode (one device active)
+					activeCount := 0
+					a.mu.RLock()
+					for i := range a.devices {
+						if a.devices[i].videoActive {
+							activeCount++
+						}
+					}
+					a.mu.RUnlock()
+					crtOn := dev.crtOn && activeCount == 1
+					// Sinusoidal CRT scanline profile: brightest at scanline center,
+					// smoothly fading to minBright at edges. pixelH = scale (3 here).
+					var factors [scale]uint16
+					if crtOn {
+						const minBright = 0.45
+						pixelH := float32(scale)
+						for i := range scale {
+							fracY := float32(i) / pixelH
+							bell := float32(math.Sin(float64(fracY) * math.Pi))
+							f := minBright + (1.0-minBright)*bell
+							factors[i] = uint16(f * 255)
+						}
+					} else {
+						for i := range scale {
+							factors[i] = 255
+						}
+					}
+					for y := range imaging.HEIGHT {
 						srcRow := y * srcStride
-						for sy := 0; sy < scale; sy++ {
-							dstRow := (y*scale+sy)*dstStride
-							for x := 0; x < imaging.WIDTH; x++ {
+						for sy := range scale {
+							dstRow := (y*scale + sy) * dstStride
+							f := factors[sy]
+							for x := range imaging.WIDTH {
 								c := lut[srcPix[srcRow+x]&0x0F]
-								for sx := 0; sx < scale; sx++ {
+								r := byte(uint16(c.R) * f / 255)
+								g := byte(uint16(c.G) * f / 255)
+								b := byte(uint16(c.B) * f / 255)
+								for sx := range scale {
 									off := dstRow + (x*scale+sx)*4
-									dstPix[off] = c.R
-									dstPix[off+1] = c.G
-									dstPix[off+2] = c.B
+									dstPix[off] = r
+									dstPix[off+1] = g
+									dstPix[off+2] = b
 									dstPix[off+3] = c.A
 								}
 							}
@@ -678,9 +756,9 @@ func (a *guiApp) layoutCastButton(gtx layout.Context, dev *deviceUI) layout.Dime
 			iconCast.Layout(gtx, colorToggleOff)
 		} else if dev.casting {
 			if hovered {
-				iconCast.Layout(gtx, colorHoverWhite)
+				iconCastConnected.Layout(gtx, colorHoverWhite)
 			} else {
-				iconCast.Layout(gtx, colorInactive)
+				iconCastConnected.Layout(gtx, colorInactive)
 			}
 		} else {
 			if hovered {
@@ -742,6 +820,7 @@ func (a *guiApp) startRecording(dev *deviceUI) {
 		return
 	}
 	renderer.SetOverlay(dev.overlayOn)
+	renderer.SetCrt(dev.crtOn)
 
 	a.mu.Lock()
 	dev.recRenderer = renderer
@@ -807,6 +886,7 @@ func (a *guiApp) startCasting(dev *deviceUI) {
 		return
 	}
 	renderer.SetOverlay(dev.overlayOn)
+	renderer.SetCrt(dev.crtOn)
 
 	a.mu.Lock()
 	dev.castRenderer = renderer

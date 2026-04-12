@@ -153,7 +153,7 @@ func (p *OutputPipeline) initVideoEncoder(cfg StreamConfig, globalHeader bool) e
 
 	dict := astiav.NewDictionary()
 	defer dict.Free()
-	dict.Set("preset", "ultrafast", astiav.NewDictionaryFlags())
+	dict.Set("preset", "veryfast", astiav.NewDictionaryFlags())
 	dict.Set("tune", "zerolatency", astiav.NewDictionaryFlags())
 
 	if err := p.videoCodecCtx.Open(codec, dict); err != nil {

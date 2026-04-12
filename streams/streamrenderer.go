@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image"
 	"image/png"
+	"math"
 	"os"
 	"os/signal"
 	"sync/atomic"
@@ -41,6 +42,10 @@ type StreamRenderer struct {
 	recordWithOverlay  bool // whether the record output gets the overlay
 	overlayEnabled     atomic.Bool // live toggle from GUI, read per-frame
 	forceKeyframe      atomic.Bool // request IDR on next frame after overlay toggle
+	crtEnabled         atomic.Bool // CRT scanline effect toggle
+	crtFactors         []uint16   // cached scanline brightness factors
+	crtFactorsDstH     int        // dstH the factors were computed for
+	crtFactorsSrcH     int        // srcH the factors were computed for
 	zeroBuf            []byte      // pre-zeroed buffer for fast clear via copy()
 	paletteLUT         [16]bgraColor // pre-built BGRA lookup table for C64 palette
 	paletteLUTReady    bool
@@ -357,11 +362,11 @@ func (d *StreamRenderer) composeFrameInto(buf []byte, gameImg image.Image, withO
 		minX := bounds.Min.X
 		minY := bounds.Min.Y
 
-		for y := 0; y < dstH; y++ {
+		for y := range dstH {
 			srcY := y * srcH / dstH
 			rowOff := (dstY + y) * outputW * 4
 			srcRow := (minY + srcY) * stride
-			for x := 0; x < dstW; x++ {
+			for x := range dstW {
 				srcX := x * srcW / dstW
 				c := lut[pix[srcRow+minX+srcX]]
 				off := rowOff + (dstX+x)*4
@@ -372,10 +377,10 @@ func (d *StreamRenderer) composeFrameInto(buf []byte, gameImg image.Image, withO
 			}
 		}
 	} else {
-		for y := 0; y < dstH; y++ {
+		for y := range dstH {
 			srcY := y * srcH / dstH
 			rowOff := (dstY + y) * outputW * 4
-			for x := 0; x < dstW; x++ {
+			for x := range dstW {
 				srcX := x * srcW / dstW
 				r, g, b, a := gameImg.At(bounds.Min.X+srcX, bounds.Min.Y+srcY).RGBA()
 				off := rowOff + (dstX+x)*4
@@ -385,6 +390,11 @@ func (d *StreamRenderer) composeFrameInto(buf []byte, gameImg image.Image, withO
 				buf[off+3] = byte(a >> 8)
 			}
 		}
+	}
+
+	// Apply CRT scanlines to the game rectangle BEFORE drawing the overlay
+	if d.crtEnabled.Load() {
+		d.applyScanlinesRect(buf, d.bufWidth(), dstX, dstY, dstW, dstH, srcH)
 	}
 
 	// Draw overlay on top of the game
@@ -417,10 +427,10 @@ func (d *StreamRenderer) composeNative(buf []byte, gameImg image.Image) {
 		minX := bounds.Min.X
 		minY := bounds.Min.Y
 
-		for y := 0; y < srcH; y++ {
+		for y := range srcH {
 			srcRow := (minY+y)*stride + minX
 			rowOff := y * bufW * 4
-			for x := 0; x < srcW; x++ {
+			for x := range srcW {
 				c := lut[pix[srcRow+x]]
 				off := rowOff + (dstX+x)*4
 				buf[off+0] = c.b
@@ -430,9 +440,9 @@ func (d *StreamRenderer) composeNative(buf []byte, gameImg image.Image) {
 			}
 		}
 	} else {
-		for y := 0; y < srcH; y++ {
+		for y := range srcH {
 			rowOff := y * bufW * 4
-			for x := 0; x < srcW; x++ {
+			for x := range srcW {
 				r, g, b, a := gameImg.At(bounds.Min.X+x, bounds.Min.Y+y).RGBA()
 				off := rowOff + (dstX+x)*4
 				buf[off+0] = byte(b >> 8)
@@ -459,10 +469,10 @@ func blitToBGRA(buf []byte, img image.Image, dstX, dstY, dstW, dstH, stride int)
 
 	// Fast path for *image.NRGBA (common PNG decode result)
 	if nrgba, ok := img.(*image.NRGBA); ok {
-		for y := 0; y < maxY; y++ {
+		for y := range maxY {
 			srcOff := (bounds.Min.Y+y-nrgba.Rect.Min.Y)*nrgba.Stride + (bounds.Min.X-nrgba.Rect.Min.X)*4
 			dstOff := ((dstY+y)*stride + dstX) * 4
-			for x := 0; x < maxX; x++ {
+			for x := range maxX {
 				si := srcOff + x*4
 				a := uint16(nrgba.Pix[si+3])
 				if a == 0 {
@@ -486,8 +496,8 @@ func blitToBGRA(buf []byte, img image.Image, dstX, dstY, dstW, dstH, stride int)
 		return
 	}
 
-	for y := 0; y < maxY; y++ {
-		for x := 0; x < maxX; x++ {
+	for y := range maxY {
+		for x := range maxX {
 			r, g, b, a := img.At(bounds.Min.X+x, bounds.Min.Y+y).RGBA()
 			if a == 0 {
 				continue
@@ -549,6 +559,65 @@ func (d *StreamRenderer) Shutdown() {
 		d.recordPipeline = nil
 	}
 	fmt.Println("Shutdown complete")
+}
+
+// SetCrt toggles the CRT scanline effect at runtime (thread-safe).
+func (d *StreamRenderer) SetCrt(enabled bool) {
+	d.crtEnabled.Store(enabled)
+	d.forceKeyframe.Store(true)
+}
+
+// bufWidth returns the current BGRA buffer width based on overlay state.
+func (d *StreamRenderer) bufWidth() int {
+	if d.nativeBuf {
+		w, _ := d.srcDims(false)
+		return w
+	}
+	return outputW
+}
+
+// applyScanlinesRect applies a CRT-style smooth scanline gradient within a
+// rectangle. Factors are cached and only recomputed when dstH or srcHeight
+// change, avoiding per-frame math.Sin calls.
+func (d *StreamRenderer) applyScanlinesRect(buf []byte, bufW, dstX, dstY, dstW, dstH, srcHeight int) {
+	if dstW <= 0 || dstH <= 0 || srcHeight <= 0 {
+		return
+	}
+	pixelH := float32(dstH) / float32(srcHeight)
+	if pixelH < 1.5 {
+		return
+	}
+
+	// Recompute factors only when dimensions change
+	if d.crtFactors == nil || d.crtFactorsDstH != dstH || d.crtFactorsSrcH != srcHeight {
+		const minBright = 0.45
+		d.crtFactors = make([]uint16, dstH)
+		for sy := range dstH {
+			fracY := float32(sy)/pixelH - float32(int(float32(sy)/pixelH))
+			bell := float32(math.Sin(float64(fracY) * math.Pi))
+			f := minBright + (1.0-minBright)*bell
+			d.crtFactors[sy] = uint16(f * 255)
+		}
+		d.crtFactorsDstH = dstH
+		d.crtFactorsSrcH = srcHeight
+	}
+
+	factors := d.crtFactors
+	for sy := range dstH {
+		f := factors[sy]
+		if f >= 255 {
+			continue
+		}
+		y := dstY + sy
+		rowOff := y * bufW * 4
+		start := rowOff + dstX*4
+		end := start + dstW*4
+		for i := start; i < end; i += 4 {
+			buf[i] = byte(uint16(buf[i]) * f / 255)
+			buf[i+1] = byte(uint16(buf[i+1]) * f / 255)
+			buf[i+2] = byte(uint16(buf[i+2]) * f / 255)
+		}
+	}
 }
 
 // SetOverlay toggles the overlay compositing at runtime.
