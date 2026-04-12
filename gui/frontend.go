@@ -787,18 +787,13 @@ func (a *guiApp) startCasting(dev *deviceUI) {
 		return
 	}
 
-	// Use the first configured streaming target
 	targets := config.GetConfig().StreamingTargets
-	if len(targets) == 0 {
-		fmt.Println("No streaming targets configured")
+	url, ok := targets["twitch"]
+	if !ok {
+		fmt.Println("No 'twitch' streaming target configured")
 		return
 	}
-	var targetName, url string
-	for name, u := range targets {
-		targetName = name
-		url = u
-		break
-	}
+	targetName := "twitch"
 
 	renderer := &streams.StreamRenderer{
 		ScaleFactor: 100,

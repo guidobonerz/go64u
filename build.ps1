@@ -79,8 +79,7 @@ cd '$($ffmpegDir -replace '\\','/')'
     --enable-gpl --enable-libx264 \
     --enable-static --disable-shared \
     --disable-programs --disable-doc \
-    --disable-network \
-    --enable-protocol=file,pipe \
+    --enable-protocol=file,pipe,tcp,rtmp \
     --enable-encoder=libx264,aac \
     --enable-decoder=rawvideo,pcm_s16le \
     --enable-muxer=flv,mp4,matroska \
@@ -117,6 +116,10 @@ make install
     go build -trimpath -ldflags "-w -s -extldflags '-static'" -o "$moduleName.exe" main.go
 
     if ($LASTEXITCODE -eq 0) {
+        if ($p) {
+            Write-Host "Compressing with UPX..." -ForegroundColor Cyan
+            upx --best "$moduleName.exe"
+        }
         $size = [math]::Round((Get-Item "$moduleName.exe").Length / 1MB, 1)
         Write-Host "=== Build successful: $moduleName.exe ($size MB, static) ===" -ForegroundColor Green
         # Verify no DLL dependencies from MSYS2
