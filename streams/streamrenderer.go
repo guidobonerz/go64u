@@ -10,13 +10,14 @@ import (
 	"os/signal"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"drazil.de/go64u/config"
 	"drazil.de/go64u/imaging"
 )
 
-const outputW = 1920
-const outputH = 1080
+const outputW = 1280
+const outputH = 720
 
 type StreamRenderer struct {
 	Fps            int
@@ -67,7 +68,7 @@ func (d *StreamRenderer) Init() error {
 		Width:   outputW,
 		Height:  outputH,
 		FPS:     50,
-		Bitrate: "3000k",
+		Bitrate: "4500k",
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -233,7 +234,16 @@ func (d *StreamRenderer) initDualPipeline() error {
 	return nil
 }
 
+// Render renders a frame using the current wall-clock time as capture time.
+// Used by the CLI path where no separate capture timestamp is available.
 func (d *StreamRenderer) Render(data []byte) bool {
+	return d.RenderAt(data, time.Now())
+}
+
+// RenderAt renders a frame with an explicit capture timestamp. The timestamp
+// is propagated through the encoder so that PTS reflects when the frame was
+// actually captured at the source, independent of pipeline jitter & drops.
+func (d *StreamRenderer) RenderAt(data []byte, captureTime time.Time) bool {
 	select {
 	case <-d.ctx.Done():
 		fmt.Println("Context cancelled, stopping render")
@@ -276,21 +286,21 @@ func (d *StreamRenderer) Render(data []byte) bool {
 
 		if d.dualPipeline {
 			d.composeFrameInto(d.recordBuf, img, useOverlay && d.recordWithOverlay)
-			if err := d.recordPipeline.EncodeVideoFrame(d.recordBuf); err != nil {
+			if err := d.recordPipeline.EncodeVideoFrame(d.recordBuf, captureTime); err != nil {
 				fmt.Printf("Record encode error: %v\n", err)
 			}
 
 			d.composeFrameInto(d.bgraBuf, img, useOverlay && d.streamWithOverlay)
-			if err := d.pipeline.EncodeVideoFrame(d.bgraBuf); err != nil {
+			if err := d.pipeline.EncodeVideoFrame(d.bgraBuf, captureTime); err != nil {
 				fmt.Printf("Stream encode error: %v\n", err)
 			}
 		} else {
 			d.composeFrameInto(d.bgraBuf, img, useOverlay && (d.streamWithOverlay || d.recordWithOverlay))
-			if err := d.pipeline.EncodeVideoFrame(d.bgraBuf); err != nil {
+			if err := d.pipeline.EncodeVideoFrame(d.bgraBuf, captureTime); err != nil {
 				fmt.Printf("Encode error: %v\n", err)
 			}
 			if d.recordPipeline != nil {
-				if err := d.recordPipeline.EncodeVideoFrame(d.bgraBuf); err != nil {
+				if err := d.recordPipeline.EncodeVideoFrame(d.bgraBuf, captureTime); err != nil {
 					fmt.Printf("Record encode error: %v\n", err)
 				}
 			}

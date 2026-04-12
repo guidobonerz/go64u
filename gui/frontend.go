@@ -44,6 +44,14 @@ type guiApp struct {
 	monitor bool // --monitor mode: show video stream
 }
 
+// rawFrameMsg carries a raw paletted frame buffer together with the wall-clock
+// time it was captured from the UDP source. The capture time flows through to
+// the encoder so PTS reflects real time, independent of pipeline jitter/drops.
+type rawFrameMsg struct {
+	data        []byte
+	captureTime time.Time
+}
+
 type deviceUI struct {
 	name         string
 	description  string
@@ -63,7 +71,7 @@ type deviceUI struct {
 	crtOn        bool          // CRT monitor style enabled
 	recRenderer  *streams.StreamRenderer
 	castRenderer *streams.StreamRenderer
-	rawFrameCh   chan []byte // channel for feeding raw frames to cast/rec renderers
+	rawFrameCh   chan rawFrameMsg // channel for feeding raw frames + capture timestamps to cast/rec renderers
 	audioBtn     widget.Clickable
 	videoBtn     widget.Clickable
 	recBtn       widget.Clickable
@@ -677,8 +685,9 @@ func (a *guiApp) startVideo(dev *deviceUI) {
 					if dev.rawFrameCh != nil {
 						rawCopy := make([]byte, offset)
 						copy(rawCopy, imgBuf[:offset])
+						msg := rawFrameMsg{data: rawCopy, captureTime: time.Now()}
 						select {
-						case dev.rawFrameCh <- rawCopy:
+						case dev.rawFrameCh <- msg:
 						default:
 						}
 					}
@@ -837,18 +846,18 @@ func (a *guiApp) ensureRawFrameCh(dev *deviceUI) {
 	if dev.rawFrameCh != nil {
 		return
 	}
-	dev.rawFrameCh = make(chan []byte, 4)
+	dev.rawFrameCh = make(chan rawFrameMsg, 4)
 	go func() {
-		for raw := range dev.rawFrameCh {
+		for msg := range dev.rawFrameCh {
 			a.mu.RLock()
 			rec := dev.recRenderer
 			cast := dev.castRenderer
 			a.mu.RUnlock()
 			if rec != nil {
-				rec.Render(raw)
+				rec.RenderAt(msg.data, msg.captureTime)
 			}
 			if cast != nil {
-				cast.Render(raw)
+				cast.RenderAt(msg.data, msg.captureTime)
 			}
 		}
 	}()
