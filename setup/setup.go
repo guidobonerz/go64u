@@ -38,6 +38,7 @@ func Setup(cmd *cobra.Command, skipTerminal bool) {
 	cmd.AddCommand(commands.MountCommand())
 	cmd.AddCommand(commands.UnmountCommand())
 	cmd.AddCommand(commands.DeviceInfoCommand())
+	cmd.AddCommand(commands.OnlineCheckCommand())
 	cmd.AddCommand(commands.ScreenControlCommand())
 	cmd.AddCommand(commands.RemoteLsCommand())
 	cmd.AddCommand(database.DownloadCommand())

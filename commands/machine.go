@@ -73,12 +73,16 @@ func ResetCommand() *cobra.Command {
 		GroupID: "machine",
 		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
-			network.SendHttpRequest(&network.HttpConfig{
-				URL:    network.GetUrl("machine:reset"),
-				Method: http.MethodPut,
-			})
+			Reset()
 		},
 	}
+}
+
+func Reset() {
+	network.SendHttpRequest(&network.HttpConfig{
+		URL:    network.GetUrl("machine:reset"),
+		Method: http.MethodPut,
+	})
 }
 
 func RebootCommand() *cobra.Command {
@@ -89,12 +93,16 @@ func RebootCommand() *cobra.Command {
 		GroupID: "machine",
 		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
-			network.SendHttpRequest(&network.HttpConfig{
-				URL:    network.GetUrl("machine:reboot"),
-				Method: http.MethodPut,
-			})
+			Reboot()
 		},
 	}
+}
+
+func Reboot() {
+	network.SendHttpRequest(&network.HttpConfig{
+		URL:    network.GetUrl("machine:reboot"),
+		Method: http.MethodPut,
+	})
 }
 
 func PauseCommand() *cobra.Command {
@@ -105,12 +113,15 @@ func PauseCommand() *cobra.Command {
 		GroupID: "machine",
 		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
-			network.SendHttpRequest(&network.HttpConfig{
-				URL:    network.GetUrl("machine:pause"),
-				Method: http.MethodPut,
-			})
+
 		},
 	}
+}
+func Pause() {
+	network.SendHttpRequest(&network.HttpConfig{
+		URL:    network.GetUrl("machine:pause"),
+		Method: http.MethodPut,
+	})
 }
 
 func ResumeCommand() *cobra.Command {
@@ -121,12 +132,16 @@ func ResumeCommand() *cobra.Command {
 		GroupID: "machine",
 		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
-			network.SendHttpRequest(&network.HttpConfig{
-				URL:    network.GetUrl("machine:resume"),
-				Method: http.MethodPut,
-			})
+
 		},
 	}
+}
+
+func Resume() {
+	network.SendHttpRequest(&network.HttpConfig{
+		URL:    network.GetUrl("machine:resume"),
+		Method: http.MethodPut,
+	})
 }
 
 func PowerOffCommand() *cobra.Command {
@@ -137,12 +152,16 @@ func PowerOffCommand() *cobra.Command {
 		GroupID: "machine",
 		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
-			network.SendHttpRequest(&network.HttpConfig{
-				URL:    network.GetUrl("machine:poweroff"),
-				Method: http.MethodPut,
-			})
+			PowerOff()
 		},
 	}
+}
+
+func PowerOff() {
+	network.SendHttpRequest(&network.HttpConfig{
+		URL:    network.GetUrl("machine:poweroff"),
+		Method: http.MethodPut,
+	})
 }
 
 func ToggleMenuCommand() *cobra.Command {

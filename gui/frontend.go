@@ -12,16 +12,15 @@ import (
 	"sync"
 	"time"
 
+	"drazil.de/go64u/commands"
 	"drazil.de/go64u/config"
-	"drazil.de/go64u/fonts"
 	"drazil.de/go64u/imaging"
+	"drazil.de/go64u/network"
 	"drazil.de/go64u/streams"
 	"drazil.de/go64u/util"
 
 	"gioui.org/app"
 	"gioui.org/f32"
-	"gioui.org/font"
-	"gioui.org/font/opentype"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
@@ -36,12 +35,13 @@ import (
 )
 
 type guiApp struct {
-	window  *app.Window
-	theme   *material.Theme
-	otoCtx  *oto.Context
-	devices []deviceUI
-	mu      sync.RWMutex
-	monitor bool // --monitor mode: show video stream
+	window      *app.Window
+	theme       *material.Theme
+	otoCtx      *oto.Context
+	devices     []deviceUI
+	mu          sync.RWMutex
+	monitor     bool // --monitor mode: show video stream
+	selectedIdx int  // index of the currently selected device card (-1 if none)
 }
 
 // rawFrameMsg carries a raw paletted frame buffer together with the wall-clock
@@ -79,6 +79,14 @@ type deviceUI struct {
 	overlayBtn   widget.Clickable
 	snapBtn      widget.Clickable
 	crtBtn       widget.Clickable
+	resetBtn     widget.Clickable
+	poweroffBtn  widget.Clickable
+	cardClick    widget.Clickable
+	pauseBtn     widget.Clickable
+	paused       bool
+
+	online      bool      // live device reachability status
+	lastChecked time.Time // when the last online check completed
 }
 
 var (
@@ -93,6 +101,8 @@ var (
 	colorWaveformBg = color.NRGBA{R: 55, G: 55, B: 55, A: 255}
 	colorWaveformFg = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
 	colorSeparator  = color.NRGBA{R: 80, G: 80, B: 80, A: 255}
+	colorCardBg     = color.NRGBA{R: 45, G: 45, B: 45, A: 255}
+	colorButtonBg   = color.NRGBA{R: 70, G: 70, B: 70, A: 255}
 
 	iconPlay, _          = widget.NewIcon(icons.AVPlayArrow)
 	iconStop, _          = widget.NewIcon(icons.AVStop)
@@ -107,12 +117,17 @@ var (
 	iconOverlayOff, _    = widget.NewIcon(icons.MapsLayersClear)
 	iconCamera, _        = widget.NewIcon(icons.ImagePhotoCamera)
 	iconCrt, _           = widget.NewIcon(icons.HardwareTV)
+	iconPause, _         = widget.NewIcon(icons.AVPause)
+	iconReset, _         = widget.NewIcon(icons.NavigationRefresh)
+	iconPower, _         = widget.NewIcon(icons.ActionPowerSettingsNew)
 	colorRecording       = color.NRGBA{R: 255, G: 40, B: 40, A: 255}
+	colorCasting         = color.NRGBA{R: 255, G: 215, B: 0, A: 255}
 )
 
 func Run(monitor bool) {
 	go func() {
 		a := newApp(monitor)
+		go a.onlineCheckLoop()
 		a.run()
 		os.Exit(0)
 	}()
@@ -131,12 +146,8 @@ func newApp(monitor bool) *guiApp {
 	}
 	<-readyChan
 
-	face, err := opentype.Parse(fonts.C64ProMonoSTYLE)
-	if err != nil {
-		panic(err)
-	}
-	fontFaces := []font.FontFace{{Font: face.Font(), Face: face}}
-	shaper := text.NewShaper(text.NoSystemFonts(), text.WithCollection(fontFaces))
+	// Use system sans-serif fonts (Helvetica / Arial / Segoe UI depending on platform)
+	shaper := text.NewShaper()
 
 	th := material.NewTheme()
 	th.Shaper = shaper
@@ -160,12 +171,23 @@ func newApp(monitor bool) *guiApp {
 		w.Option(app.Title("go64u - experimental gui"), app.Size(unit.Dp(500), unit.Dp(500)))
 	}
 
+	// Start with the config's selected device highlighted (or first device)
+	selectedIdx := 0
+	selectedName := config.GetConfig().SelectedDevice
+	for i := range devices {
+		if devices[i].name == selectedName {
+			selectedIdx = i
+			break
+		}
+	}
+
 	return &guiApp{
-		window:  w,
-		theme:   th,
-		otoCtx:  otoCtx,
-		devices: devices,
-		monitor: monitor,
+		window:      w,
+		theme:       th,
+		otoCtx:      otoCtx,
+		devices:     devices,
+		monitor:     monitor,
+		selectedIdx: selectedIdx,
 	}
 }
 
@@ -189,6 +211,76 @@ func buildDeviceList() []deviceUI {
 	return devices
 }
 
+// onlineCheckLoop polls all configured devices every 5 seconds to update
+// their online status. Runs as a background goroutine for the entire app
+// lifetime.
+func (a *guiApp) onlineCheckLoop() {
+	a.checkAllDevices() // immediate check on startup
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		a.checkAllDevices()
+	}
+}
+
+// checkAllDevices probes all configured devices in parallel and updates
+// their online state. Triggers a window redraw when any status changes.
+func (a *guiApp) checkAllDevices() {
+	var wg sync.WaitGroup
+	var anyChanged bool
+	var mu sync.Mutex
+	for i := range a.devices {
+		idx := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			dev := &a.devices[idx]
+			online := network.IsDeviceOnline(dev.device, 2*time.Second)
+			a.mu.Lock()
+			changed := dev.online != online || dev.lastChecked.IsZero()
+			dev.online = online
+			dev.lastChecked = time.Now()
+			a.mu.Unlock()
+			if changed {
+				mu.Lock()
+				anyChanged = true
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	if anyChanged && a.window != nil {
+		a.window.Invalidate()
+	}
+}
+
+// layoutOnlineIndicator draws a small filled circle reflecting the device's
+// online status: gray = not yet checked, green = online, red = offline.
+func (a *guiApp) layoutOnlineIndicator(gtx layout.Context, dev *deviceUI) layout.Dimensions {
+	size := gtx.Dp(unit.Dp(10))
+	gtx.Constraints = layout.Exact(image.Pt(size, size))
+
+	var col color.NRGBA
+	a.mu.RLock()
+	switch {
+	case dev.lastChecked.IsZero():
+		col = colorToggleOff
+	case dev.online:
+		col = colorActive
+	default:
+		col = colorStrike
+	}
+	a.mu.RUnlock()
+
+	rr := clip.RRect{
+		Rect: image.Rect(0, 0, size, size),
+		SE:   size / 2, SW: size / 2, NE: size / 2, NW: size / 2,
+	}
+	defer rr.Push(gtx.Ops).Pop()
+	paint.Fill(gtx.Ops, col)
+	return layout.Dimensions{Size: image.Pt(size, size)}
+}
+
 func (a *guiApp) run() {
 	var ops op.Ops
 	for {
@@ -208,41 +300,79 @@ func (a *guiApp) layoutRoot(gtx layout.Context) layout.Dimensions {
 	defer clip.Rect{Max: gtx.Constraints.Max}.Push(gtx.Ops).Pop()
 	paint.Fill(gtx.Ops, colorBackground)
 
+	// Pre-pass: handle card-click selection BEFORE rendering any card, so all
+	// cards see the same selectedIdx during this frame. Offline devices are
+	// not selectable — click events are still drained but ignored.
+	for i := range a.devices {
+		if a.devices[i].cardClick.Clicked(gtx) {
+			if !a.devices[i].online {
+				continue
+			}
+			a.selectedIdx = i
+			config.GetConfig().SelectedDevice = a.devices[i].name
+		}
+	}
+
 	return layout.Inset{Top: 10, Bottom: 10, Left: 10, Right: 10}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		children := make([]layout.FlexChild, 0, len(a.devices)*2+2)
-		for i := range a.devices {
-			idx := i
-			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return a.layoutDevice(gtx, idx)
-			}))
-			if i < len(a.devices)-1 {
-				children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return a.layoutSeparator(gtx)
-				}))
-			}
-		}
-		// Video monitor panel below audio devices (only if any video is active)
-		hasActiveVideo := false
-		for i := range a.devices {
-			if a.devices[i].videoActive {
-				hasActiveVideo = true
-				break
-			}
-		}
-		if a.monitor && hasActiveVideo {
-			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return a.layoutSeparator(gtx)
-			}))
-			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return a.layoutVideoMonitor(gtx)
-			}))
-		}
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			// Top: context-dependent toolbar for the currently selected device
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return a.layoutTopToolbar(gtx)
+			}),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
+			// Below: horizontal split -- cards on the left, video monitor on the right (monitor mode).
+			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+				hasActiveVideo := false
+				for i := range a.devices {
+					if a.devices[i].videoActive {
+						hasActiveVideo = true
+						break
+					}
+				}
+
+				return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceEnd}.Layout(gtx,
+					// Left column: vertical list of device cards
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						cardW := gtx.Dp(unit.Dp(280))
+						gtx.Constraints.Max.X = cardW
+						gtx.Constraints.Min.X = cardW
+						children := make([]layout.FlexChild, 0, len(a.devices)*2)
+						for i := range a.devices {
+							idx := i
+							children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return a.layoutDeviceCard(gtx, idx)
+							}))
+							if i < len(a.devices)-1 {
+								children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									return layout.Spacer{Height: unit.Dp(10)}.Layout(gtx)
+								}))
+							}
+						}
+						return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+					}),
+					// Spacer between left cards and right monitor
+					layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
+					// Right column: video monitor (only when active in monitor mode)
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						if a.monitor && hasActiveVideo {
+							return a.layoutVideoMonitor(gtx)
+						}
+						return layout.Dimensions{}
+					}),
+				)
+			}),
+		)
 	})
 }
 
-func (a *guiApp) layoutDevice(gtx layout.Context, index int) layout.Dimensions {
-	dev := &a.devices[index]
+// layoutTopToolbar renders a single horizontal toolbar at the top of the window
+// that operates on the currently selected device. Handles click events for all
+// toolbar buttons (play/stop, pause, monitor toggles, reset, poweroff).
+func (a *guiApp) layoutTopToolbar(gtx layout.Context) layout.Dimensions {
+	if a.selectedIdx < 0 || a.selectedIdx >= len(a.devices) {
+		return layout.Dimensions{}
+	}
+	dev := &a.devices[a.selectedIdx]
 
 	if dev.toggle.Clicked(gtx) {
 		dev.active = !dev.active
@@ -252,8 +382,6 @@ func (a *guiApp) layoutDevice(gtx layout.Context, index int) layout.Dimensions {
 			a.stopAudio(dev)
 		}
 	}
-
-	// Handle icon button clicks
 	if a.monitor {
 		if dev.audioBtn.Clicked(gtx) {
 			dev.audioMonitor = !dev.audioMonitor
@@ -286,7 +414,6 @@ func (a *guiApp) layoutDevice(gtx layout.Context, index int) layout.Dimensions {
 		}
 		if dev.overlayBtn.Clicked(gtx) {
 			dev.overlayOn = !dev.overlayOn
-			// Apply to running cast/recording in real-time
 			if dev.castRenderer != nil {
 				dev.castRenderer.SetOverlay(dev.overlayOn)
 			}
@@ -313,68 +440,174 @@ func (a *guiApp) layoutDevice(gtx layout.Context, index int) layout.Dimensions {
 			}
 		}
 	}
+	if dev.resetBtn.Clicked(gtx) {
+		commands.Reset()
+	}
+	if dev.poweroffBtn.Clicked(gtx) {
+		commands.PowerOff()
+	}
+	if dev.pauseBtn.Clicked(gtx) {
+		dev.paused = !dev.paused
+		if dev.paused {
+			commands.Pause()
+		} else {
+			commands.Resume()
+		}
+	}
 
-	return layout.Flex{
-		Axis:      layout.Horizontal,
-		Alignment: layout.Middle,
-	}.Layout(gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Right: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return a.layoutToggle(gtx, dev)
-			})
+	return layout.Stack{}.Layout(gtx,
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			sz := gtx.Constraints.Min
+			borderRadius := gtx.Dp(unit.Dp(8))
+			borderWidth := gtx.Dp(unit.Dp(2))
+			func() {
+				rr := clip.RRect{
+					Rect: image.Rect(0, 0, sz.X, sz.Y),
+					SE:   borderRadius, SW: borderRadius, NE: borderRadius, NW: borderRadius,
+				}
+				defer rr.Push(gtx.Ops).Pop()
+				paint.Fill(gtx.Ops, colorCardBg)
+			}()
+			func() {
+				strokeRR := clip.RRect{
+					Rect: image.Rect(0, 0, sz.X, sz.Y),
+					SE:   borderRadius, SW: borderRadius, NE: borderRadius, NW: borderRadius,
+				}
+				defer clip.Stroke{Path: strokeRR.Path(gtx.Ops), Width: float32(borderWidth)}.Op().Push(gtx.Ops).Pop()
+				paint.Fill(gtx.Ops, colorSeparator)
+			}()
+			return layout.Dimensions{Size: sz}
 		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Right: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return a.layoutWaveform(gtx, dev)
-			})
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			if !a.monitor {
-				return layout.Dimensions{}
-			}
-			return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+			return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				children := []layout.FlexChild{
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return a.layoutIconButton(gtx, &dev.audioBtn, dev.audioMonitor, dev.active, iconMusic, iconMute)
+						return a.layoutToggle(gtx, dev)
 					}),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return layout.Inset{Left: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return a.layoutActionIconButton(gtx, &dev.pauseBtn, iconPause, dev.paused)
+					}),
+				}
+				if a.monitor {
+					children = append(children,
+						layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return a.layoutIconButton(gtx, &dev.audioBtn, dev.audioMonitor, dev.active, iconMusic, iconMute)
+						}),
+						layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							return a.layoutIconButton(gtx, &dev.videoBtn, dev.videoMonitor, dev.active, iconEye, iconEyeOff)
-						})
-					}),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return layout.Inset{Left: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						}),
+						layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							return a.layoutSnapshotButton(gtx, dev)
-						})
-					}),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return layout.Inset{Left: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						}),
+						layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							return a.layoutRecordButton(gtx, dev)
-						})
-					}),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return layout.Inset{Left: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						}),
+						layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							return a.layoutCastButton(gtx, dev)
-						})
-					}),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return layout.Inset{Left: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						}),
+						layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							return a.layoutIconButton(gtx, &dev.overlayBtn, dev.overlayOn, dev.active, iconOverlay, iconOverlayOff)
-						})
-					}),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return layout.Inset{Left: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						}),
+						layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							return a.layoutIconButton(gtx, &dev.crtBtn, dev.crtOn, dev.active, iconCrt, iconCrt)
-						})
+						}),
+					)
+				}
+				children = append(children,
+					layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						return a.layoutWaveform(gtx, dev)
+					}),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return a.layoutActionIconButton(gtx, &dev.resetBtn, iconReset, false)
+					}),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return a.layoutActionIconButton(gtx, &dev.poweroffBtn, iconPower, false)
+					}),
+				)
+				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
+			})
+		}),
+	)
+}
+
+// layoutDeviceCard renders a single device as a rounded card with:
+//   - Top: device label + online indicator
+//   - Bottom: waveform
+//
+// Button click handling for the toolbar now lives in layoutTopToolbar; the card
+// body is purely presentational plus the cardClick for selection (handled in
+// the pre-pass in layoutRoot).
+func (a *guiApp) layoutDeviceCard(gtx layout.Context, index int) layout.Dimensions {
+	dev := &a.devices[index]
+
+	selected := a.selectedIdx == index
+	borderCol := colorSeparator
+	if selected {
+		borderCol = colorInactive // white
+	}
+
+	// Draw card background + border, then content on top (wrapped in cardClick)
+	return dev.cardClick.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Stack{}.Layout(gtx,
+			layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+				sz := gtx.Constraints.Min
+				borderRadius := gtx.Dp(unit.Dp(8))
+				borderWidth := gtx.Dp(unit.Dp(2))
+				// Background fill
+				func() {
+					rr := clip.RRect{
+						Rect: image.Rect(0, 0, sz.X, sz.Y),
+						SE:   borderRadius, SW: borderRadius, NE: borderRadius, NW: borderRadius,
+					}
+					defer rr.Push(gtx.Ops).Pop()
+					paint.Fill(gtx.Ops, colorCardBg)
+				}()
+				// Border stroke
+				func() {
+					strokeRR := clip.RRect{
+						Rect: image.Rect(0, 0, sz.X, sz.Y),
+						SE:   borderRadius, SW: borderRadius, NE: borderRadius, NW: borderRadius,
+					}
+					defer clip.Stroke{Path: strokeRR.Path(gtx.Ops), Width: float32(borderWidth)}.Op().Push(gtx.Ops).Pop()
+					paint.Fill(gtx.Ops, borderCol)
+				}()
+				return layout.Dimensions{Size: sz}
+			}),
+		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+			return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+					// Row 1: device label (left) + online indicator (top-right corner)
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								lbl := material.Label(a.theme, unit.Sp(18), dev.description)
+								lbl.Color = colorText
+								return lbl.Layout(gtx)
+							}),
+							layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+								return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, 0)}
+							}),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return a.layoutOnlineIndicator(gtx, dev)
+							}),
+						)
 					}),
 				)
 			})
 		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			lbl := material.Label(a.theme, unit.Sp(16), dev.description)
-			return lbl.Layout(gtx)
-		}),
-	)
+		)
+	})
 }
 
 func (a *guiApp) layoutToggle(gtx layout.Context, dev *deviceUI) layout.Dimensions {
@@ -393,6 +626,28 @@ func (a *guiApp) layoutToggle(gtx layout.Context, dev *deviceUI) layout.Dimensio
 
 // layoutIconButton renders a clickable material icon. Uses colorActive when on,
 // colorInactive when off. Video uses visibility/visibility_off icons.
+// layoutActionIconButton renders a simple clickable action icon.
+// Not a toggle -- color is white when hovered (light-green), otherwise white
+// if highlighted, else gray. Used for pause/reset/poweroff.
+func (a *guiApp) layoutActionIconButton(gtx layout.Context, btn *widget.Clickable, icon *widget.Icon, highlighted bool) layout.Dimensions {
+	size := gtx.Dp(unit.Dp(28))
+	gtx.Constraints = layout.Exact(image.Pt(size, size))
+	hovered := btn.Hovered()
+	return btn.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		var col color.NRGBA
+		switch {
+		case hovered:
+			col = colorHoverWhite
+		case highlighted:
+			col = colorActive
+		default:
+			col = colorInactive
+		}
+		icon.Layout(gtx, col)
+		return layout.Dimensions{Size: image.Pt(size, size)}
+	})
+}
+
 func (a *guiApp) layoutIconButton(gtx layout.Context, btn *widget.Clickable, active bool, streamActive bool, iconOn, iconOff *widget.Icon) layout.Dimensions {
 	size := gtx.Dp(unit.Dp(28))
 	gtx.Constraints = layout.Exact(image.Pt(size, size))
@@ -418,23 +673,39 @@ func (a *guiApp) layoutIconButton(gtx layout.Context, btn *widget.Clickable, act
 }
 
 func (a *guiApp) layoutWaveform(gtx layout.Context, dev *deviceUI) layout.Dimensions {
-	w := gtx.Dp(unit.Dp(140))
+	w := gtx.Constraints.Max.X
 	h := gtx.Dp(unit.Dp(40))
-	gap := gtx.Dp(unit.Dp(4))
+	gap := gtx.Dp(unit.Dp(6))
 	sz := image.Pt(w, h)
 	gtx.Constraints = layout.Exact(sz)
 
-	// Background
+	halfH := float32(h) / 2
+	channelW := (w - gap) / 2
+
+	// Overall clip for the whole waveform area
 	defer clip.Rect{Max: sz}.Push(gtx.Ops).Pop()
-	paint.Fill(gtx.Ops, colorWaveformBg)
+
+	// Two separate backgrounds (left + right) with a visible gap between them
+	func() {
+		defer clip.Rect{Max: image.Pt(channelW, h)}.Push(gtx.Ops).Pop()
+		paint.Fill(gtx.Ops, colorWaveformBg)
+	}()
+	func() {
+		defer clip.Rect{Min: image.Pt(channelW+gap, 0), Max: image.Pt(2*channelW+gap, h)}.Push(gtx.Ops).Pop()
+		paint.Fill(gtx.Ops, colorWaveformBg)
+	}()
 
 	a.mu.RLock()
 	data := dev.waveform
 	a.mu.RUnlock()
 
 	if len(data) > 8 {
-		halfH := float32(h) / 2
-		channelW := (w - gap) / 2
+		// Scale x so samples span the full channelW, regardless of sample count.
+		sampleCount := (len(data) - 6) / 4
+		if sampleCount < 1 {
+			sampleCount = 1
+		}
+		xStep := float32(channelW) / float32(sampleCount)
 
 		// Build left channel path first
 		var pathLeft clip.Path
@@ -450,8 +721,8 @@ func (a *guiApp) layoutWaveform(gtx layout.Context, dev *deviceUI) layout.Dimens
 			} else {
 				pathLeft.LineTo(f32.Pt(x, v))
 			}
-			x += 1
-			if int(x) >= channelW {
+			x += xStep
+			if x >= float32(channelW) {
 				break
 			}
 		}
@@ -476,8 +747,8 @@ func (a *guiApp) layoutWaveform(gtx layout.Context, dev *deviceUI) layout.Dimens
 			} else {
 				pathRight.LineTo(f32.Pt(offsetX+x, v))
 			}
-			x += 1
-			if int(x) >= channelW {
+			x += xStep
+			if x >= float32(channelW) {
 				break
 			}
 		}
@@ -761,20 +1032,13 @@ func (a *guiApp) layoutCastButton(gtx layout.Context, dev *deviceUI) layout.Dime
 	gtx.Constraints = layout.Exact(image.Pt(size, size))
 	hovered := dev.castBtn.Hovered()
 	return dev.castBtn.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		if !dev.active {
-			iconCast.Layout(gtx, colorToggleOff)
-		} else if dev.casting {
-			if hovered {
-				iconCastConnected.Layout(gtx, colorHoverWhite)
-			} else {
-				iconCastConnected.Layout(gtx, colorInactive)
-			}
-		} else {
-			if hovered {
-				iconCast.Layout(gtx, colorHoverGray)
-			} else {
-				iconCast.Layout(gtx, colorToggleOff)
-			}
+		switch {
+		case dev.casting:
+			iconCastConnected.Layout(gtx, colorCasting)
+		case hovered:
+			iconCast.Layout(gtx, colorHoverWhite)
+		default:
+			iconCast.Layout(gtx, colorInactive)
 		}
 		return layout.Dimensions{Size: image.Pt(size, size)}
 	})
