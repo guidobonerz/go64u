@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -n \"Green\\\\|Red\\\\|Reset\" /c/Users/guido/git/go64u/util/*.go)",
+      "Bash(go build:*)",
+      "Read(//c/Users/guido/go/pkg/mod/golang.org/x/exp/**)"
+    ]
+  }
+}
