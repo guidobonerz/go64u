@@ -138,7 +138,7 @@ make install
 
     $env:CGO_LDFLAGS = $ldflags
     go build -trimpath -ldflags "-w -s -extldflags '-static'" -o "$moduleName.exe" main.go
-
+#-H=windowsgui
     if ($LASTEXITCODE -eq 0) {
         if ($p) {
             Write-Host "Compressing with UPX..." -ForegroundColor Cyan
@@ -162,7 +162,7 @@ make install
     # --- Normal dynamic build ---
     $env:CGO_ENABLED = "1"
     $env:PKG_CONFIG_PATH = "$mingw\lib\pkgconfig"
-    go build -trimpath -ldflags "-w -s" -o "$moduleName.exe" main.go
+    go build -trimpath -ldflags "-H=windowsgui -w -s" -o "$moduleName.exe" main.go
 
     if ($p) {
         upx --best "$moduleName.exe"
