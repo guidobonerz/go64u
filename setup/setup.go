@@ -16,8 +16,10 @@ func Setup(cmd *cobra.Command, skipTerminal bool) {
 	cmd.AddGroup(&cobra.Group{ID: "runner", Title: util.YellowText("Runner Commands")})
 	cmd.AddGroup(&cobra.Group{ID: "stream", Title: util.YellowText("Stream Commands")})
 	cmd.AddGroup(&cobra.Group{ID: "vic", Title: util.YellowText("VIC Commands")})
+	cmd.AddGroup(&cobra.Group{ID: "drives", Title: util.YellowText("Drive Commands")})
 
 	cmd.AddCommand(commands.ShowDevicesCommand())
+	cmd.AddCommand(commands.DrivesCommand())
 	cmd.AddCommand(commands.WriteMemoryCommand())
 	cmd.AddCommand(commands.ReadMemoryCommand())
 	//cmd.AddCommand(commands.DumpPageCommand())

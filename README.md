@@ -71,17 +71,17 @@ NOTE: <span style="color:red">If you want to stream the u64 stream via rtmp to t
 
 ## How to start
 
-### Option1 - Terminal Mode
+### Option1 - UI Mode
 
-go64u <command>
+go64u
 
 ### Option2 - Terminal Mode(REPL)
 
 go64u --terminal
 
-### Option3 - GUI Mode
+### Option3 - CLI Mode
 
-go64u --monitor
+go64u <command>
 
 ## How to stream to twitch or other platforms
 start go64u in terminal mode : .\go64u.exe --terminal

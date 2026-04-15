@@ -3,7 +3,13 @@
     "allow": [
       "Bash(grep -n \"Green\\\\|Red\\\\|Reset\" /c/Users/guido/git/go64u/util/*.go)",
       "Bash(go build:*)",
-      "Read(//c/Users/guido/go/pkg/mod/golang.org/x/exp/**)"
+      "Read(//c/Users/guido/go/pkg/mod/golang.org/x/exp/**)",
+      "Read(//c/Users/guido/go/pkg/mod/gioui.org@v0.9.0/io/transfer/**)",
+      "Read(//c/Users/guido/go/pkg/mod/gioui.org@v0.9.0/app/**)",
+      "Read(//c/Users/guido/go/pkg/mod/gioui.org@v0.9.0/**)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\guido\\git\\go64u"
     ]
   }
 }
