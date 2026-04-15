@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"drazil.de/go64u/config"
@@ -20,34 +19,10 @@ var rootCmd = &cobra.Command{
 	Long:  util.WhiteText("go64u is a tool for remote interaction with the Ultimate64 computer"),
 	Run: func(cmd *cobra.Command, args []string) {
 
-		mode := 0
-		runInGuiMode, _ := cmd.Flags().GetBool("gui")
-		runInMonitorMode, _ := cmd.Flags().GetBool("monitor")
 		runInTerminalMode, _ := cmd.Flags().GetBool("terminal")
 
-		if runInMonitorMode {
-			runInGuiMode = true
-		}
-
-		if len(args) == 0 && !runInGuiMode && !runInTerminalMode {
-			cmd.Help()
-			return
-		}
-
-		if runInGuiMode {
-			mode |= 1
-		}
-		if runInTerminalMode {
-			mode |= 2
-		}
-
-		if mode != 1 && mode != 2 {
-			fmt.Println("Too much arugemnts. you have to select only one mode")
-			os.Exit(0)
-		}
-
-		if runInGuiMode {
-			gui.Run(runInMonitorMode)
+		if len(args) == 0 && !runInTerminalMode {
+			gui.Run()
 		} else if runInTerminalMode {
 			terminal.Run()
 		}
@@ -55,15 +30,13 @@ var rootCmd = &cobra.Command{
 }
 
 func main() {
-
-	setup.Setup(rootCmd, false)
-	rootCmd.Flags().Bool("gui", false, "run the application in GUI(Graphics User Interface) mode")
-	rootCmd.Flags().Bool("monitor", false, "run GUI with video monitor (shows video stream when audio is playing)")
 	rootCmd.Flags().Bool("terminal", false, "run the application in terminal mode")
 	rootCmd.PersistentFlags().StringVarP(&config.GetConfig().SelectedDevice, "device", "d", config.GetConfig().SelectedDevice, "set device. needed in non terminal mode")
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
+	setup.Setup(rootCmd, false)
+
 }
 
 func init() {

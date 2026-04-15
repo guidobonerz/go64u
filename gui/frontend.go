@@ -1,12 +1,13 @@
 package gui
 
 import (
+	"context"
 	"fmt"
 	"image"
 	"image/color"
 	"image/png"
 	"math"
-	"net"
+	"net/http"
 	"os"
 	"sort"
 	"sync"
@@ -35,13 +36,24 @@ import (
 )
 
 type guiApp struct {
-	window      *app.Window
-	theme       *material.Theme
-	otoCtx      *oto.Context
-	devices     []deviceUI
-	mu          sync.RWMutex
-	monitor     bool // --monitor mode: show video stream
-	selectedIdx int  // index of the currently selected device card (-1 if none)
+	window          *app.Window
+	theme           *material.Theme
+	otoCtx          *oto.Context
+	devices         []deviceUI
+	mu              sync.RWMutex
+	selectedIdx     int    // index of the currently selected device card (-1 if none)
+	hint            string // footer text, updated by layoutTopToolbar on hover
+	toolbarHeightPx int    // measured toolbar height in physical pixels, for drop-hit geometry
+	dropMu          sync.Mutex
+	dropHits        []dropHit // rectangles (client-area px) of each visible monitor cell, updated each frame
+}
+
+// dropHit maps a monitor cell's on-screen rectangle (in Windows client-area
+// pixels) to the originating device index. Used to route a file drop to the
+// device whose monitor the drop landed on, independently of selection.
+type dropHit struct {
+	rect   image.Rectangle
+	devIdx int
 }
 
 // rawFrameMsg carries a raw paletted frame buffer together with the wall-clock
@@ -98,7 +110,7 @@ var (
 	colorStrike     = color.NRGBA{R: 254, G: 0, B: 0, A: 255}
 	colorHoverWhite = color.NRGBA{R: 150, G: 255, B: 130, A: 255} // light green hover for white icons
 	colorHoverGray  = color.NRGBA{R: 0, G: 160, B: 0, A: 255}     // dark green hover for gray icons
-	colorWaveformBg = color.NRGBA{R: 55, G: 55, B: 55, A: 255}
+	colorWaveformBg = color.NRGBA{R: 0, G: 0, B: 0, A: 255}
 	colorWaveformFg = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
 	colorSeparator  = color.NRGBA{R: 80, G: 80, B: 80, A: 255}
 	colorCardBg     = color.NRGBA{R: 45, G: 45, B: 45, A: 255}
@@ -124,17 +136,47 @@ var (
 	colorCasting         = color.NRGBA{R: 255, G: 215, B: 0, A: 255}
 )
 
-func Run(monitor bool) {
+func Run() {
 	go func() {
-		a := newApp(monitor)
+		a := newApp()
 		go a.onlineCheckLoop()
+		enableFileDrop("go64u - monitor", func(x, y int, data []byte) {
+			go a.handleDrop(x, y, data)
+		})
+
 		a.run()
 		os.Exit(0)
 	}()
 	app.Main()
 }
 
-func newApp(monitor bool) *guiApp {
+// handleDrop routes a dropped file to the device whose monitor rect contains
+// the drop point. Falls back to the currently selected device when the drop
+// happens outside any visible monitor cell.
+func (a *guiApp) handleDrop(x, y int, data []byte) {
+	var devIdx = -1
+	a.dropMu.Lock()
+	for _, h := range a.dropHits {
+		if x >= h.rect.Min.X && x < h.rect.Max.X && y >= h.rect.Min.Y && y < h.rect.Max.Y {
+			devIdx = h.devIdx
+			break
+		}
+	}
+	a.dropMu.Unlock()
+
+	if devIdx < 0 {
+		commands.Run(data)
+		return
+	}
+	device := a.devices[devIdx].device
+	network.SendHttpRequest(&network.HttpConfig{
+		URL:     fmt.Sprintf("http://%s/v1/runners:run_prg", device.IpAddress),
+		Method:  http.MethodPost,
+		Payload: data,
+	})
+}
+
+func newApp() *guiApp {
 	op := &oto.NewContextOptions{
 		SampleRate:   48000,
 		ChannelCount: 2,
@@ -164,12 +206,9 @@ func newApp(monitor bool) *guiApp {
 	}
 
 	w := new(app.Window)
-	if monitor {
-		// 768x544 image pixels + room for audio panel + insets
-		w.Option(app.Title("go64u - monitor"), app.Size(unit.Dp(800), unit.Dp(680)))
-	} else {
-		w.Option(app.Title("go64u - experimental gui"), app.Size(unit.Dp(500), unit.Dp(500)))
-	}
+
+	// 768x544 image pixels + room for audio panel + insets
+	w.Option(app.Title("go64u - monitor"), app.Size(unit.Dp(800), unit.Dp(680)))
 
 	// Start with the config's selected device highlighted (or first device)
 	selectedIdx := 0
@@ -186,7 +225,6 @@ func newApp(monitor bool) *guiApp {
 		theme:       th,
 		otoCtx:      otoCtx,
 		devices:     devices,
-		monitor:     monitor,
 		selectedIdx: selectedIdx,
 	}
 }
@@ -301,13 +339,9 @@ func (a *guiApp) layoutRoot(gtx layout.Context) layout.Dimensions {
 	paint.Fill(gtx.Ops, colorBackground)
 
 	// Pre-pass: handle card-click selection BEFORE rendering any card, so all
-	// cards see the same selectedIdx during this frame. Offline devices are
-	// not selectable — click events are still drained but ignored.
+	// cards see the same selectedIdx during this frame.
 	for i := range a.devices {
 		if a.devices[i].cardClick.Clicked(gtx) {
-			if !a.devices[i].online {
-				continue
-			}
 			a.selectedIdx = i
 			config.GetConfig().SelectedDevice = a.devices[i].name
 		}
@@ -317,10 +351,12 @@ func (a *guiApp) layoutRoot(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			// Top: context-dependent toolbar for the currently selected device
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return a.layoutTopToolbar(gtx)
+				dims := a.layoutTopToolbar(gtx)
+				a.toolbarHeightPx = dims.Size.Y
+				return dims
 			}),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
-			// Below: horizontal split -- cards on the left, video monitor on the right (monitor mode).
+			// Middle: horizontal split -- cards on the left, video monitor on the right (monitor mode).
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 				hasActiveVideo := false
 				for i := range a.devices {
@@ -354,15 +390,46 @@ func (a *guiApp) layoutRoot(gtx layout.Context) layout.Dimensions {
 					layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
 					// Right column: video monitor (only when active in monitor mode)
 					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-						if a.monitor && hasActiveVideo {
+						if hasActiveVideo {
 							return a.layoutVideoMonitor(gtx)
 						}
 						return layout.Dimensions{}
 					}),
 				)
 			}),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
+			// Footer: hint text for hovered toolbar icons
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return a.layoutFooter(gtx)
+			}),
 		)
 	})
+}
+
+// layoutFooter renders a thin status strip at the bottom of the window that
+// displays the current hover hint (or a blank reserved line when nothing is
+// hovered). a.hint is updated each frame in layoutTopToolbar.
+func (a *guiApp) layoutFooter(gtx layout.Context) layout.Dimensions {
+	return layout.Inset{Left: unit.Dp(6), Right: unit.Dp(6), Top: unit.Dp(2), Bottom: unit.Dp(2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		text := a.hint
+		if text == "" {
+			text = " " // reserve the line height so the footer doesn't collapse
+		}
+		lbl := material.Label(a.theme, unit.Sp(13), text)
+		lbl.Color = colorToggleOff
+		return lbl.Layout(gtx)
+	})
+}
+
+// layoutGrayIcon renders a plain gray-tinted material icon with a fixed
+// square size. Used to show toolbar buttons in a disabled look when the
+// selected device is offline. No clickable wrapper — so hover tracking is
+// not available in this state.
+func layoutGrayIcon(gtx layout.Context, icon *widget.Icon, sizeDp unit.Dp) layout.Dimensions {
+	size := gtx.Dp(sizeDp)
+	gtx.Constraints = layout.Exact(image.Pt(size, size))
+	icon.Layout(gtx, colorToggleOff)
+	return layout.Dimensions{Size: image.Pt(size, size)}
 }
 
 // layoutTopToolbar renders a single horizontal toolbar at the top of the window
@@ -373,17 +440,58 @@ func (a *guiApp) layoutTopToolbar(gtx layout.Context) layout.Dimensions {
 		return layout.Dimensions{}
 	}
 	dev := &a.devices[a.selectedIdx]
+	enabled := dev.online
 
-	if dev.toggle.Clicked(gtx) {
-		dev.active = !dev.active
-		if dev.active {
-			a.startAudio(dev)
-		} else {
-			a.stopAudio(dev)
-		}
+	// Always drain click events so they don't queue up while disabled.
+	toggleClicked := dev.toggle.Clicked(gtx)
+	pauseClicked := dev.pauseBtn.Clicked(gtx)
+	resetClicked := dev.resetBtn.Clicked(gtx)
+	poweroffClicked := dev.poweroffBtn.Clicked(gtx)
+	audioClicked := dev.audioBtn.Clicked(gtx)
+	videoClicked := dev.videoBtn.Clicked(gtx)
+	crtClicked := dev.crtBtn.Clicked(gtx)
+	overlayClicked := dev.overlayBtn.Clicked(gtx)
+	recClicked := dev.recBtn.Clicked(gtx)
+	castClicked := dev.castBtn.Clicked(gtx)
+
+	// Update footer hint from current hover state.
+	a.hint = ""
+	switch {
+	case dev.toggle.Hovered():
+		a.hint = "Start / stop the Ultimate stream"
+	case dev.pauseBtn.Hovered():
+		a.hint = "Pause / resume the machine"
+	case dev.audioBtn.Hovered():
+		a.hint = "Toggle local audio monitoring"
+	case dev.videoBtn.Hovered():
+		a.hint = "Toggle local video monitoring"
+	case dev.snapBtn.Hovered():
+		a.hint = "Take a screenshot"
+	case dev.recBtn.Hovered():
+		a.hint = "Record the stream to a file"
+	case dev.castBtn.Hovered():
+		a.hint = "Cast the stream to a streaming platform"
+	case dev.overlayBtn.Hovered():
+		a.hint = "Toggle overlay image on cast / recording"
+	case dev.crtBtn.Hovered():
+		a.hint = "Toggle CRT effect on cast / recording"
+	case dev.resetBtn.Hovered():
+		a.hint = "Reset the machine"
+	case dev.poweroffBtn.Hovered():
+		a.hint = "Power off the machine"
 	}
-	if a.monitor {
-		if dev.audioBtn.Clicked(gtx) {
+
+	if enabled {
+		if toggleClicked {
+			dev.active = !dev.active
+			if dev.active {
+				a.startAudio(dev)
+			} else {
+				a.stopAudio(dev)
+			}
+		}
+
+		if audioClicked {
 			dev.audioMonitor = !dev.audioMonitor
 			if dev.active {
 				if dev.audioMonitor && !dev.audioPlaying {
@@ -393,7 +501,7 @@ func (a *guiApp) layoutTopToolbar(gtx layout.Context) layout.Dimensions {
 				}
 			}
 		}
-		if dev.videoBtn.Clicked(gtx) {
+		if videoClicked {
 			dev.videoMonitor = !dev.videoMonitor
 			if dev.active {
 				if dev.videoMonitor && !dev.videoActive {
@@ -403,7 +511,7 @@ func (a *guiApp) layoutTopToolbar(gtx layout.Context) layout.Dimensions {
 				}
 			}
 		}
-		if dev.crtBtn.Clicked(gtx) {
+		if crtClicked {
 			dev.crtOn = !dev.crtOn
 			if dev.castRenderer != nil {
 				dev.castRenderer.SetCrt(dev.crtOn)
@@ -412,7 +520,7 @@ func (a *guiApp) layoutTopToolbar(gtx layout.Context) layout.Dimensions {
 				dev.recRenderer.SetCrt(dev.crtOn)
 			}
 		}
-		if dev.overlayBtn.Clicked(gtx) {
+		if overlayClicked {
 			dev.overlayOn = !dev.overlayOn
 			if dev.castRenderer != nil {
 				dev.castRenderer.SetOverlay(dev.overlayOn)
@@ -421,7 +529,7 @@ func (a *guiApp) layoutTopToolbar(gtx layout.Context) layout.Dimensions {
 				dev.recRenderer.SetOverlay(dev.overlayOn)
 			}
 		}
-		if dev.recBtn.Clicked(gtx) {
+		if recClicked {
 			if dev.active {
 				if !dev.recording {
 					a.startRecording(dev)
@@ -430,7 +538,7 @@ func (a *guiApp) layoutTopToolbar(gtx layout.Context) layout.Dimensions {
 				}
 			}
 		}
-		if dev.castBtn.Clicked(gtx) {
+		if castClicked {
 			if dev.active {
 				if !dev.casting {
 					a.startCasting(dev)
@@ -439,102 +547,153 @@ func (a *guiApp) layoutTopToolbar(gtx layout.Context) layout.Dimensions {
 				}
 			}
 		}
-	}
-	if dev.resetBtn.Clicked(gtx) {
-		commands.Reset()
-	}
-	if dev.poweroffBtn.Clicked(gtx) {
-		commands.PowerOff()
-	}
-	if dev.pauseBtn.Clicked(gtx) {
-		dev.paused = !dev.paused
-		if dev.paused {
-			commands.Pause()
-		} else {
-			commands.Resume()
+
+		if resetClicked {
+			commands.Reset()
+		}
+		if poweroffClicked {
+			// Stop any active streams/casts/recordings before powering off,
+			// then mark the device offline immediately so the toolbar disables
+			// without waiting for the next online-check tick.
+			if dev.casting {
+				a.stopCasting(dev)
+			}
+			if dev.recording {
+				a.stopRecording(dev)
+			}
+			if dev.videoActive {
+				a.stopVideo(dev)
+			}
+			if dev.active {
+				a.stopAudio(dev)
+			}
+			commands.PowerOff()
+			dev.online = false
+			dev.lastChecked = time.Now()
+		}
+		if pauseClicked {
+			dev.paused = !dev.paused
+			if dev.paused {
+				commands.Pause()
+			} else {
+				commands.Resume()
+			}
 		}
 	}
+
+	// Re-read online state AFTER click handlers run, so a power-off click
+	// (which flips dev.online to false) immediately disables the render path
+	// below instead of waiting for the next frame.
+	enabled = dev.online
 
 	return layout.Stack{}.Layout(gtx,
 		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
 			sz := gtx.Constraints.Min
 			borderRadius := gtx.Dp(unit.Dp(8))
-			borderWidth := gtx.Dp(unit.Dp(2))
-			func() {
-				rr := clip.RRect{
-					Rect: image.Rect(0, 0, sz.X, sz.Y),
-					SE:   borderRadius, SW: borderRadius, NE: borderRadius, NW: borderRadius,
-				}
-				defer rr.Push(gtx.Ops).Pop()
-				paint.Fill(gtx.Ops, colorCardBg)
-			}()
-			func() {
-				strokeRR := clip.RRect{
-					Rect: image.Rect(0, 0, sz.X, sz.Y),
-					SE:   borderRadius, SW: borderRadius, NE: borderRadius, NW: borderRadius,
-				}
-				defer clip.Stroke{Path: strokeRR.Path(gtx.Ops), Width: float32(borderWidth)}.Op().Push(gtx.Ops).Pop()
-				paint.Fill(gtx.Ops, colorSeparator)
-			}()
+			borderWidth := gtx.Dp(unit.Dp(3))
+
+			rr := clip.RRect{
+				Rect: image.Rect(0, 0, sz.X, sz.Y),
+				SE:   borderRadius, SW: borderRadius, NE: borderRadius, NW: borderRadius,
+			}
+			defer rr.Push(gtx.Ops).Pop()
+			paint.Fill(gtx.Ops, colorCardBg)
+
+			strokeRR := clip.RRect{
+				Rect: image.Rect(0, 0, sz.X, sz.Y),
+				SE:   borderRadius, SW: borderRadius, NE: borderRadius, NW: borderRadius,
+			}
+			defer clip.Stroke{Path: strokeRR.Path(gtx.Ops), Width: float32(borderWidth)}.Op().Push(gtx.Ops).Pop()
+			paint.Fill(gtx.Ops, colorSeparator)
+
 			return layout.Dimensions{Size: sz}
 		}),
 		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
 			return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				children := []layout.FlexChild{
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if !enabled {
+							return layoutGrayIcon(gtx, iconPlay, unit.Dp(40))
+						}
 						return a.layoutToggle(gtx, dev)
 					}),
 					layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if !enabled {
+							return layoutGrayIcon(gtx, iconPause, unit.Dp(28))
+						}
 						return a.layoutActionIconButton(gtx, &dev.pauseBtn, iconPause, dev.paused)
 					}),
-				}
-				if a.monitor {
-					children = append(children,
-						layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return a.layoutIconButton(gtx, &dev.audioBtn, dev.audioMonitor, dev.active, iconMusic, iconMute)
-						}),
-						layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return a.layoutIconButton(gtx, &dev.videoBtn, dev.videoMonitor, dev.active, iconEye, iconEyeOff)
-						}),
-						layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return a.layoutSnapshotButton(gtx, dev)
-						}),
-						layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return a.layoutRecordButton(gtx, dev)
-						}),
-						layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return a.layoutCastButton(gtx, dev)
-						}),
-						layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return a.layoutIconButton(gtx, &dev.overlayBtn, dev.overlayOn, dev.active, iconOverlay, iconOverlayOff)
-						}),
-						layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return a.layoutIconButton(gtx, &dev.crtBtn, dev.crtOn, dev.active, iconCrt, iconCrt)
-						}),
-					)
-				}
-				children = append(children,
+
+					layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if !enabled {
+							return layoutGrayIcon(gtx, iconMute, unit.Dp(28))
+						}
+						return a.layoutIconButton(gtx, &dev.audioBtn, dev.audioMonitor, dev.active, iconMusic, iconMute)
+					}),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if !enabled {
+							return layoutGrayIcon(gtx, iconEyeOff, unit.Dp(28))
+						}
+						return a.layoutIconButton(gtx, &dev.videoBtn, dev.videoMonitor, dev.active, iconEye, iconEyeOff)
+					}),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if !enabled {
+							return layoutGrayIcon(gtx, iconCamera, unit.Dp(28))
+						}
+						return a.layoutSnapshotButton(gtx, dev)
+					}),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if !enabled {
+							return layoutGrayIcon(gtx, iconRecord, unit.Dp(28))
+						}
+						return a.layoutRecordButton(gtx, dev)
+					}),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if !enabled {
+							return layoutGrayIcon(gtx, iconCast, unit.Dp(28))
+						}
+						return a.layoutCastButton(gtx, dev)
+					}),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if !enabled {
+							return layoutGrayIcon(gtx, iconOverlayOff, unit.Dp(28))
+						}
+						return a.layoutIconButton(gtx, &dev.overlayBtn, dev.overlayOn, dev.active, iconOverlay, iconOverlayOff)
+					}),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if !enabled {
+							return layoutGrayIcon(gtx, iconCrt, unit.Dp(28))
+						}
+						return a.layoutIconButton(gtx, &dev.crtBtn, dev.crtOn, dev.active, iconCrt, iconCrt)
+					}),
+
 					layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
 					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 						return a.layoutWaveform(gtx, dev)
 					}),
 					layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if !enabled {
+							return layoutGrayIcon(gtx, iconReset, unit.Dp(28))
+						}
 						return a.layoutActionIconButton(gtx, &dev.resetBtn, iconReset, false)
 					}),
 					layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if !enabled {
+							return layoutGrayIcon(gtx, iconPower, unit.Dp(28))
+						}
 						return a.layoutActionIconButton(gtx, &dev.poweroffBtn, iconPower, false)
 					}),
-				)
+				}
 				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
 			})
 		}),
@@ -563,49 +722,49 @@ func (a *guiApp) layoutDeviceCard(gtx layout.Context, index int) layout.Dimensio
 			layout.Expanded(func(gtx layout.Context) layout.Dimensions {
 				sz := gtx.Constraints.Min
 				borderRadius := gtx.Dp(unit.Dp(8))
-				borderWidth := gtx.Dp(unit.Dp(2))
+				borderWidth := gtx.Dp(unit.Dp(3))
 				// Background fill
-				func() {
-					rr := clip.RRect{
-						Rect: image.Rect(0, 0, sz.X, sz.Y),
-						SE:   borderRadius, SW: borderRadius, NE: borderRadius, NW: borderRadius,
-					}
-					defer rr.Push(gtx.Ops).Pop()
-					paint.Fill(gtx.Ops, colorCardBg)
-				}()
+
+				rr := clip.RRect{
+					Rect: image.Rect(0, 0, sz.X, sz.Y),
+					SE:   borderRadius, SW: borderRadius, NE: borderRadius, NW: borderRadius,
+				}
+				defer rr.Push(gtx.Ops).Pop()
+				paint.Fill(gtx.Ops, colorCardBg)
+
 				// Border stroke
-				func() {
-					strokeRR := clip.RRect{
-						Rect: image.Rect(0, 0, sz.X, sz.Y),
-						SE:   borderRadius, SW: borderRadius, NE: borderRadius, NW: borderRadius,
-					}
-					defer clip.Stroke{Path: strokeRR.Path(gtx.Ops), Width: float32(borderWidth)}.Op().Push(gtx.Ops).Pop()
-					paint.Fill(gtx.Ops, borderCol)
-				}()
+
+				strokeRR := clip.RRect{
+					Rect: image.Rect(0, 0, sz.X, sz.Y),
+					SE:   borderRadius, SW: borderRadius, NE: borderRadius, NW: borderRadius,
+				}
+				defer clip.Stroke{Path: strokeRR.Path(gtx.Ops), Width: float32(borderWidth)}.Op().Push(gtx.Ops).Pop()
+				paint.Fill(gtx.Ops, borderCol)
+
 				return layout.Dimensions{Size: sz}
 			}),
-		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-			return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-					// Row 1: device label (left) + online indicator (top-right corner)
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								lbl := material.Label(a.theme, unit.Sp(18), dev.description)
-								lbl.Color = colorText
-								return lbl.Layout(gtx)
-							}),
-							layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-								return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, 0)}
-							}),
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								return a.layoutOnlineIndicator(gtx, dev)
-							}),
-						)
-					}),
-				)
-			})
-		}),
+			layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+				return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+						// Row 1: device label (left) + online indicator (top-right corner)
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									lbl := material.Label(a.theme, unit.Sp(18), dev.description)
+									lbl.Color = colorText
+									return lbl.Layout(gtx)
+								}),
+								layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+									return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, 0)}
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									return a.layoutOnlineIndicator(gtx, dev)
+								}),
+							)
+						}),
+					)
+				})
+			}),
 		)
 	})
 }
@@ -624,11 +783,6 @@ func (a *guiApp) layoutToggle(gtx layout.Context, dev *deviceUI) layout.Dimensio
 	})
 }
 
-// layoutIconButton renders a clickable material icon. Uses colorActive when on,
-// colorInactive when off. Video uses visibility/visibility_off icons.
-// layoutActionIconButton renders a simple clickable action icon.
-// Not a toggle -- color is white when hovered (light-green), otherwise white
-// if highlighted, else gray. Used for pause/reset/poweroff.
 func (a *guiApp) layoutActionIconButton(gtx layout.Context, btn *widget.Clickable, icon *widget.Icon, highlighted bool) layout.Dimensions {
 	size := gtx.Dp(unit.Dp(28))
 	gtx.Constraints = layout.Exact(image.Pt(size, size))
@@ -762,25 +916,16 @@ func (a *guiApp) layoutWaveform(gtx layout.Context, dev *deviceUI) layout.Dimens
 	return layout.Dimensions{Size: sz}
 }
 
-func (a *guiApp) layoutSeparator(gtx layout.Context) layout.Dimensions {
-	height := gtx.Dp(unit.Dp(1))
-	width := gtx.Constraints.Max.X
-	sz := image.Pt(width, height)
-	inset := layout.Inset{Top: unit.Dp(5), Bottom: unit.Dp(5)}
-	return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		defer clip.Rect{Max: sz}.Push(gtx.Ops).Pop()
-		paint.Fill(gtx.Ops, colorSeparator)
-		return layout.Dimensions{Size: sz}
-	})
-}
-
 func (a *guiApp) layoutVideoMonitor(gtx layout.Context) layout.Dimensions {
-	// Collect active video streams
+	// Collect active video streams with their originating device index so we
+	// can highlight the selected device's monitor when multiple are shown.
 	a.mu.RLock()
 	var activeFrames []*image.NRGBA
+	var activeIdx []int
 	for i := range a.devices {
 		if a.devices[i].videoActive && a.devices[i].videoFrame != nil {
 			activeFrames = append(activeFrames, a.devices[i].videoFrame)
+			activeIdx = append(activeIdx, i)
 		}
 	}
 	a.mu.RUnlock()
@@ -790,7 +935,6 @@ func (a *guiApp) layoutVideoMonitor(gtx layout.Context) layout.Dimensions {
 		count = 1 // reserve space for at least one panel
 	}
 
-	// Split available width evenly across active streams with 10px gap
 	totalW := gtx.Constraints.Max.X
 	gap := gtx.Dp(unit.Dp(10))
 	totalGap := gap * (count - 1)
@@ -799,20 +943,33 @@ func (a *guiApp) layoutVideoMonitor(gtx layout.Context) layout.Dimensions {
 	sz := image.Pt(totalW, cellH)
 	gtx.Constraints = layout.Exact(sz)
 
-	// Draw each active frame side by side with rounded border
+	monitorOriginX := gtx.Dp(unit.Dp(10)) + gtx.Dp(unit.Dp(280)) + gtx.Dp(unit.Dp(10))
+	monitorOriginY := gtx.Dp(unit.Dp(10)) + a.toolbarHeightPx + gtx.Dp(unit.Dp(10))
+
+	hits := make([]dropHit, 0, len(activeFrames))
+
 	borderWidth := gtx.Dp(unit.Dp(3))
 	borderRadius := gtx.Dp(unit.Dp(8))
 	for i, frame := range activeFrames {
+		absX := monitorOriginX + i*(cellW+gap)
+		absY := monitorOriginY
+		hits = append(hits, dropHit{
+			rect:   image.Rect(absX, absY, absX+cellW, absY+cellH),
+			devIdx: activeIdx[i],
+		})
 		offsetX := i * (cellW + gap)
 		stack := op.Offset(image.Pt(offsetX, 0)).Push(gtx.Ops)
 
-		// Rounded border
+		borderCol := colorSeparator
+		if len(activeFrames) > 1 && activeIdx[i] == a.selectedIdx {
+			borderCol = colorInactive
+		}
 		rrect := clip.RRect{
 			Rect: image.Rect(0, 0, cellW, cellH),
 			SE:   borderRadius, SW: borderRadius, NE: borderRadius, NW: borderRadius,
 		}
 		borderStack := clip.Stroke{Path: rrect.Path(gtx.Ops), Width: float32(borderWidth)}.Op().Push(gtx.Ops)
-		paint.Fill(gtx.Ops, colorSeparator)
+		paint.Fill(gtx.Ops, borderCol)
 		borderStack.Pop()
 
 		// Clip image to rounded rect
@@ -833,7 +990,122 @@ func (a *guiApp) layoutVideoMonitor(gtx layout.Context) layout.Dimensions {
 		stack.Pop()
 	}
 
+	a.dropMu.Lock()
+	a.dropHits = hits
+	a.dropMu.Unlock()
+
 	return layout.Dimensions{Size: sz}
+}
+
+const videoMonitorScale = 3
+
+// guiVideoRenderer implements streams.Renderer for the in-app video monitor:
+// it decodes raw paletted frames into a pre-scaled NRGBA buffer, applies the
+// optional CRT scanline effect, and forwards raw frames to the cast/rec pipe.
+type guiVideoRenderer struct {
+	app         *guiApp
+	dev         *deviceUI
+	reusableImg *imaging.ReusablePalettedImage
+	lut         [16]color.NRGBA
+	nrgbaFrame  *image.NRGBA
+}
+
+func newGuiVideoRenderer(a *guiApp, dev *deviceUI) *guiVideoRenderer {
+	r := &guiVideoRenderer{
+		app:         a,
+		dev:         dev,
+		reusableImg: imaging.NewReusablePalettedImage(),
+		nrgbaFrame:  image.NewNRGBA(image.Rect(0, 0, imaging.WIDTH*videoMonitorScale, imaging.HEIGHT*videoMonitorScale)),
+	}
+	for i, c := range util.GetPalette() {
+		if i >= 16 {
+			break
+		}
+		cr, cg, cb, ca := c.RGBA()
+		r.lut[i] = color.NRGBA{R: uint8(cr >> 8), G: uint8(cg >> 8), B: uint8(cb >> 8), A: uint8(ca >> 8)}
+	}
+	return r
+}
+
+func (r *guiVideoRenderer) Init() error                 { return nil }
+func (r *guiVideoRenderer) GetRunMode() streams.RunMode { return streams.Loop }
+func (r *guiVideoRenderer) GetFPS() int                 { return 50 }
+func (r *guiVideoRenderer) GetContext() context.Context { return context.Background() }
+
+func (r *guiVideoRenderer) Render(data []byte) bool {
+	if !r.dev.videoActive {
+		return false
+	}
+
+	palImg := r.reusableImg.Decode(data)
+	srcStride := palImg.Stride
+	srcPix := palImg.Pix
+	dstStride := r.nrgbaFrame.Stride
+	dstPix := r.nrgbaFrame.Pix
+
+	// Only show local scanlines in single-display mode (one device active)
+	activeCount := 0
+	r.app.mu.RLock()
+	for i := range r.app.devices {
+		if r.app.devices[i].videoActive {
+			activeCount++
+		}
+	}
+	r.app.mu.RUnlock()
+	crtOn := r.dev.crtOn && activeCount == 1
+
+	const scale = videoMonitorScale
+	var factors [scale]uint16
+	if crtOn {
+		const minBright = 0.45
+		pixelH := float32(scale)
+		for i := range scale {
+			fracY := float32(i) / pixelH
+			bell := float32(math.Sin(float64(fracY) * math.Pi))
+			f := minBright + (1.0-minBright)*bell
+			factors[i] = uint16(f * 255)
+		}
+	} else {
+		for i := range scale {
+			factors[i] = 255
+		}
+	}
+	for y := range imaging.HEIGHT {
+		srcRow := y * srcStride
+		for sy := range scale {
+			dstRow := (y*scale + sy) * dstStride
+			f := factors[sy]
+			for x := range imaging.WIDTH {
+				c := r.lut[srcPix[srcRow+x]&0x0F]
+				rr := byte(uint16(c.R) * f / 255)
+				g := byte(uint16(c.G) * f / 255)
+				b := byte(uint16(c.B) * f / 255)
+				for sx := range scale {
+					off := dstRow + (x*scale+sx)*4
+					dstPix[off] = rr
+					dstPix[off+1] = g
+					dstPix[off+2] = b
+					dstPix[off+3] = c.A
+				}
+			}
+		}
+	}
+
+	r.app.mu.Lock()
+	r.dev.videoFrame = r.nrgbaFrame
+	r.app.mu.Unlock()
+	r.app.window.Invalidate()
+
+	if r.dev.rawFrameCh != nil {
+		rawCopy := make([]byte, len(data))
+		copy(rawCopy, data)
+		select {
+		case r.dev.rawFrameCh <- rawFrameMsg{data: rawCopy, captureTime: time.Now()}:
+		default:
+		}
+	}
+
+	return true
 }
 
 func (a *guiApp) startVideo(dev *deviceUI) {
@@ -843,133 +1115,11 @@ func (a *guiApp) startVideo(dev *deviceUI) {
 	dev.videoActive = true
 	streams.VideoStart(dev.device)
 
-	reusableImg := imaging.NewReusablePalettedImage()
-	palette := util.GetPalette()
-
-	go func() {
-		socket := dev.device.VideoUdpConnection
-		dataBuffer := make([]byte, 780)
-		imgBuf := make([]byte, imaging.SIZE/2)
-		count := 0
-		offset := 0
-		capture := false
-
-		// Pre-build NRGBA palette LUT
-		var lut [16]color.NRGBA
-		for i, c := range palette {
-			if i >= 16 {
-				break
-			}
-			r, g, b, aa := c.RGBA()
-			lut[i] = color.NRGBA{R: uint8(r >> 8), G: uint8(g >> 8), B: uint8(b >> 8), A: uint8(aa >> 8)}
-		}
-
-		// Pre-scaled frame for crisp nearest-neighbor display
-		// Scale up to a reasonable size; Gio handles final dp-to-pixel mapping
-		const scale = 3
-		displayW := imaging.WIDTH * scale
-		displayH := imaging.HEIGHT * scale
-		nrgbaFrame := image.NewNRGBA(image.Rect(0, 0, displayW, displayH))
-
-		for dev.videoActive && socket != nil {
-			_, _, err := socket.ReadFromUDP(dataBuffer)
-			if err != nil {
-				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-					continue
-				}
-				break
-			}
-
-			linenumber := util.GetWordFromArray(4, dataBuffer)
-
-			// Copy packet data first (bit-15 packet is LAST of current frame)
-			if capture && offset+len(dataBuffer[12:]) <= len(imgBuf) {
-				n := copy(imgBuf[offset:], dataBuffer[12:])
-				offset += n
-				count++
-			}
-
-			// Bit 15 = last packet of frame. Emit completed frame, start new one.
-			if linenumber&0x8000 == 0x8000 {
-				if capture && count == 68 {
-					// Decode paletted image and nearest-neighbor scale into NRGBA
-					palImg := reusableImg.Decode(imgBuf[:offset])
-					srcStride := palImg.Stride
-					srcPix := palImg.Pix
-					dstStride := nrgbaFrame.Stride
-					dstPix := nrgbaFrame.Pix
-
-					// Only show local scanlines in single-display mode (one device active)
-					activeCount := 0
-					a.mu.RLock()
-					for i := range a.devices {
-						if a.devices[i].videoActive {
-							activeCount++
-						}
-					}
-					a.mu.RUnlock()
-					crtOn := dev.crtOn && activeCount == 1
-					// Sinusoidal CRT scanline profile: brightest at scanline center,
-					// smoothly fading to minBright at edges. pixelH = scale (3 here).
-					var factors [scale]uint16
-					if crtOn {
-						const minBright = 0.45
-						pixelH := float32(scale)
-						for i := range scale {
-							fracY := float32(i) / pixelH
-							bell := float32(math.Sin(float64(fracY) * math.Pi))
-							f := minBright + (1.0-minBright)*bell
-							factors[i] = uint16(f * 255)
-						}
-					} else {
-						for i := range scale {
-							factors[i] = 255
-						}
-					}
-					for y := range imaging.HEIGHT {
-						srcRow := y * srcStride
-						for sy := range scale {
-							dstRow := (y*scale + sy) * dstStride
-							f := factors[sy]
-							for x := range imaging.WIDTH {
-								c := lut[srcPix[srcRow+x]&0x0F]
-								r := byte(uint16(c.R) * f / 255)
-								g := byte(uint16(c.G) * f / 255)
-								b := byte(uint16(c.B) * f / 255)
-								for sx := range scale {
-									off := dstRow + (x*scale+sx)*4
-									dstPix[off] = r
-									dstPix[off+1] = g
-									dstPix[off+2] = b
-									dstPix[off+3] = c.A
-								}
-							}
-						}
-					}
-
-					a.mu.Lock()
-					dev.videoFrame = nrgbaFrame
-					a.mu.Unlock()
-					a.window.Invalidate()
-
-					// Feed raw frame to cast/rec goroutine (non-blocking, outside lock)
-					if dev.rawFrameCh != nil {
-						rawCopy := make([]byte, offset)
-						copy(rawCopy, imgBuf[:offset])
-						msg := rawFrameMsg{data: rawCopy, captureTime: time.Now()}
-						select {
-						case dev.rawFrameCh <- msg:
-						default:
-						}
-					}
-				}
-
-				capture = true
-				count = 0
-				offset = 0
-			}
-		}
-	}()
+	reader := &streams.VideoReader{
+		Device:   dev.device,
+		Renderer: newGuiVideoRenderer(a, dev),
+	}
+	go reader.Read()
 }
 
 func (a *guiApp) stopVideo(dev *deviceUI) {
@@ -1247,7 +1397,7 @@ func (a *guiApp) startAudio(dev *deviceUI) {
 	}
 	fmt.Printf("stream on %s started\n", dev.name)
 
-	if a.monitor && dev.videoMonitor {
+	if dev.videoMonitor {
 		a.startVideo(dev)
 	}
 }

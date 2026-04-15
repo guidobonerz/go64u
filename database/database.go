@@ -101,7 +101,7 @@ func DownloadCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "query",
 		Short:   "query packages matching to a filter",
-		Long:    "query packages matching to a filter\nBy default is filter by current year and type=d64",
+		Long:    "query packages matching to a filter\nBy default filter is set to current year and type=d64",
 		GroupID: "platform",
 		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
@@ -248,8 +248,9 @@ func prompt() {
 
 func filterCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "filter",
-		Short: "filter",
+		Use:     "filter",
+		Short:   "filter",
+		GroupID: "platform",
 		Run: func(cmd *cobra.Command, args []string) {
 			scanner := bufio.NewReader(os.Stdin)
 			for {
@@ -357,8 +358,9 @@ func buildFilterItem(name string, value string, quote bool) string {
 
 func listCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:   "list",
-		Short: "list filtered results",
+		Use:     "list",
+		Short:   "list filtered results",
+		GroupID: "platform",
 		Run: func(cmd *cobra.Command, args []string) {
 
 			offset := 0

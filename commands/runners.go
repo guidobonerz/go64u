@@ -39,15 +39,19 @@ func RunCommand() *cobra.Command {
 		Args:    cobra.MaximumNArgs(2),
 		Run: func(cmd *cobra.Command, args []string) {
 			payload, _ := util.ReadFile(args[0])
-			network.SendHttpRequest(&network.HttpConfig{
-				URL:     network.GetUrl("runners:run_prg"),
-				Method:  http.MethodPost,
-				Payload: payload,
-			})
+			Run(payload)
 		},
 	}
 	//cmd.Flags().BoolP("detectstart", "d", false, "detect start address if address is not given")
 	return cmd
+}
+
+func Run(payload []byte) {
+	network.SendHttpRequest(&network.HttpConfig{
+		URL:     network.GetUrl("runners:run_prg"),
+		Method:  http.MethodPost,
+		Payload: payload,
+	})
 }
 
 func CrtCommand() *cobra.Command {

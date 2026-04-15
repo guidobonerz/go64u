@@ -51,6 +51,26 @@ func UnmountCommand() *cobra.Command {
 	}
 }
 
+func DrivesCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:     "drives",
+		Short:   "Show drive info",
+		Long:    "Show drive info",
+		GroupID: "drives",
+		Args:    cobra.ExactArgs(0),
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Println(string(Drives()))
+		},
+	}
+}
+
+func Drives() []byte {
+	return network.SendHttpRequest(&network.HttpConfig{
+		URL:    network.GetUrl("drives"),
+		Method: http.MethodGet,
+	})
+}
+
 func isValidDrive(drive string) bool {
 	return strings.ToLower(drive) == "a" || strings.ToLower(drive) == "b"
 }
