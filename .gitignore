@@ -8,6 +8,10 @@
 *.sql
 *.java
 *.js
+*.log
+*.000
+*.upx
+*.mkv
 __debug.*
 # Test binary, built with `go test -c`
 *.test
@@ -20,3 +24,7 @@ __debug.*
 go64u.exe
 ffmpeg_static/
 dist/
+.claude/
+
+
+
