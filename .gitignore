@@ -25,6 +25,7 @@ go64u.exe
 ffmpeg_static/
 dist/
 .claude/
+.claude/**
 
 
 
