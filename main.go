@@ -30,12 +30,12 @@ var rootCmd = &cobra.Command{
 }
 
 func main() {
+	setup.Setup(rootCmd, false)
 	rootCmd.Flags().Bool("terminal", false, "run the application in terminal mode")
 	rootCmd.PersistentFlags().StringVarP(&config.GetConfig().SelectedDevice, "device", "d", config.GetConfig().SelectedDevice, "set device. needed in non terminal mode")
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
-	setup.Setup(rootCmd, false)
 
 }
 

@@ -47,9 +47,6 @@ Show device configurations.
 ### `message [message] [x] [y]`
 Writes a message on screen at a given position.
 
-### `page [number] [file]`
-Dumps a memory page to a file.
-
 ### `pause`
 Pauses the U64 by pulling the DMA line low at a safe moment. This stops the CPU. Note that this does not stop any timers.
 
@@ -102,17 +99,6 @@ Unmounts a disk image from a given drive.
 ---
 
 ## File Commands
-
-### `copy [from] [to]`
-Copy files from local machine to internal storage and vice versa.
-
-### `find []`
-Find files in the internal drive (USB Stick, SD Card, Disk Images, etc.).
-
-| Flag | Short | Type | Default | Description |
-|------|-------|------|---------|-------------|
-| `--memaddress` | `-m` | bool | `false` | Display the start address of a program if possible |
-| `--filter` | `-f` | string | *(empty)* | Filter the list by a match pattern like `*.prg` |
 
 ### `ls [path/diskimage]`
 List files of the internal drive (USB Stick, SD Card, Disk Images, etc.).
@@ -175,20 +161,26 @@ Takes a screenshot of the current screen.
 
 ## Platform Commands
 
-### `category`
-Show categories.
-
-### `filter`
-Show/set active filters.
-
 ### `info`
 Show device info.
 
-### `list`
-List filtered results.
-
 ### `online`
 Check if the selected device is online (responds to HTTP requests).
+
+---
+
+## Terminal Mode (REPL)
+
+Terminal mode is started with `go64u --terminal`. It provides an interactive REPL where all standard commands are available plus the following **terminal-only commands**:
+
+### `asc`
+Interactive audio stream controller. Lets you select from configured devices, play/stop audio streams, and switch between devices interactively.
+
+### `cd [path/diskimage]`
+Change the folder on the internal drive. Only available in terminal mode because it maintains a persistent working directory across commands.
+
+### `device [device_key]`
+Switch the active device within the terminal session. Shows the current device if no key is provided.
 
 ### `query`
 Query packages matching a filter. By default the filter is set to the current year and type=d64.
@@ -210,21 +202,6 @@ Query packages matching a filter. By default the filter is set to the current ye
 | `--ignoreDefaults` | bool | `false` | Ignore default filters |
 | `--get` | bool | `false` | Download the files |
 
----
-
-## Terminal Mode (REPL)
-
-Terminal mode is started with `go64u --terminal`. It provides an interactive REPL where all standard commands are available plus the following **terminal-only commands**:
-
-### `asc`
-Interactive audio stream controller. Lets you select from configured devices, play/stop audio streams, and switch between devices interactively.
-
-### `cd [path/diskimage]`
-Change the folder on the internal drive. Only available in terminal mode because it maintains a persistent working directory across commands.
-
-### `device [device_key]`
-Switch the active device within the terminal session. Shows the current device if no key is provided.
-
 ### `quit`
 Quit the terminal and exit the application.
 
@@ -236,6 +213,24 @@ Stream to your favourite streaming platform (e.g. Twitch/YouTube). Starts both v
 | `--target` | string | *(empty)* | Streaming platform (e.g. twitch, youtube) |
 | `--record` | string | *(empty)* | Record locally: `audio`, `video`, or `both` |
 | `--no-overlay` | string | *(empty)* | Disable overlay for: `stream`, `record`, or `both` |
+
+---
+
+### Database Sub-REPL
+
+After entering `query` (or its dedicated database mode), the following sub-commands are available within the database REPL:
+
+#### `category`
+Show categories.
+
+#### `filter`
+Show/set active filters.
+
+#### `list`
+List filtered results.
+
+#### `quit`
+Leave the database sub-REPL.
 
 ---
 
