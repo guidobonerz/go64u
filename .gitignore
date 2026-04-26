@@ -26,6 +26,8 @@ ffmpeg_static/
 dist/
 .claude/
 .claude/**
+.vscode/
+.vscode/**
 
 
 
