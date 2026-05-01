@@ -7,6 +7,7 @@ import (
 )
 
 func SendTcpData(payload []byte, target string) {
+	fmt.Println(payload)
 	conn, err := net.Dial("tcp", fmt.Sprintf("%s:64", target))
 	if err != nil {
 		panic(err)

@@ -323,29 +323,35 @@ Create an environment variable **GO64U_CONFIG_PATH** where the **.go64u.yaml** f
 The structure of the file is currently as follows:
 
 ```yaml
-LogLevel: quiet
+LogLevel: ffmpeg_loglevel
 Devices:
-  DEVICE_NAME[n]:
-    Description: "Device name"
+  DEVICE_NAME1:
+    Description: "Device Nme"
     IsDefault: true
     IpAddress: <ip of device>
     VideoPort: 11000
     AudioPort: 11001
     DebugPort: 11002
+  DEVICE_NAME2:
+    Description: "Device name"
+    IpAddress: <ip of device>
+    VideoPort: 21000
+    AudioPort: 21001
+    DebugPort: 21002
 StreamingTargets:
-  <name of the streaming platform, e.g. twitch>: rtmp://live.twitch.tv/app/<stream_key>
-  <second platform...>: rtmp://
-LogLevel: ffmpeg_loglevel
+  twitch: rtmp://live.twitch.tv/app/<stream_key>
+  OTHER: rtmp://
+ResourceUrl: http://hackerswithstyle.se/leet/search
+DatabaseClient: Assembly64  
 DumpFolder: <path to dump folder>
-RecordingFolder: <path to recording folder>
 ScreenshotFolder: <path to screenshot folder>
-DownloadFolder: <path to download folder>
+RecordingFolder: <path to recording folder>
 Overlay:
-    X: 700
-    Y: 200
-    WIDTH: 800
-    HEIGHT: 600
-    ImagePath: <path to overlay image>
+  ImagePath: <path to 1920x1080 overlay PNG with transparent stream area>
+  GameX: 160
+  GameY: 100
+  GameW: 1536
+  GameH: 1088
 ```
 
 > **Note:** If you have more than one Ultimate64 board, you have to choose different ports for each board.

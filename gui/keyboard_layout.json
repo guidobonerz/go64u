@@ -473,16 +473,22 @@
     }, {
       "id" : 0,
       "type" : "FUNCTION",
-      "name" : "LOAD *",
+      "name" : "LOAD",
       "size" : 4,
-      "text" : "LOAD *"
+      "text" : "LOAD"
     } ]
   }, {
     "keys" : [ {
       "id" : 0,
-      "type" : "FILLER",
-      "size" : 2
-    }, {
+      "type" : "KEY",
+      "symbol" : false,
+      "size" : 2,
+      "name" : "R/S",
+      "text" : "R/S",
+      "codeOptions" : [ "3", "131", "131 ", null ]
+      
+      
+    } , {
       "id" : 0,
       "type" : "KEY",
       "size" : 1,
@@ -591,7 +597,17 @@
       "size" : 2,
       "index" : 64,
       "text" : "BC"
-    } ]
+    }, {
+      "id" : 0,
+      "type" : "FILLER",
+      "size" : 0.3
+    }, {
+      "id" : 0,
+      "type" : "FUNCTION",
+      "name" : "AUTO",
+      "size" : 3,
+      "text" : "AUTO"
+    }  ]
   }, {
     "keys" : [ {
       "id" : 0,
@@ -735,15 +751,6 @@
       "size" : 1,
       "text" : "\uE315",
       "codeOptions" : [ "29", "29", "29", null ]
-    }, {
-      "id" : 0,
-      "type" : "KEY",
-      "symbol" : true,
-      "size" : 4,
-      "name" : "RUN/STOP",
-      "text" : "RUN/STOP",
-      "codeOptions" : [ "3", "131", "131 ", null ],
-      "displayOptions" : [ [ "\uE047", "\uE047", "\uE047", "\uE047" ], [ "\uE566", "\uE566", "\uE566", "\uE566" ], [ "\uE047", "\uE047", "\uE047", "\uE047" ] ]
-    } ]
+    }]
   } ]
 }

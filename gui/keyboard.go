@@ -344,16 +344,10 @@ var (
 	kbColorBoxBlack = color.NRGBA{R: 0, G: 0, B: 0, A: 255}
 )
 
-// Layout renders the keyboard at a fixed cell size (a size-1 key is exactly
-// 25×25 dp); the widget's overall dimensions are derived from that, not from
-// the available width. Height is rowsCount * rowH so the caller can place it
-// as a Rigid child.
-func (vk *VirtualKeyboard) Layout(th *material.Theme, gtx layout.Context) layout.Dimensions {
-	rowH := gtx.Dp(unit.Dp(25))
-	unitW := gtx.Dp(unit.Dp(25))
-	gap := gtx.Dp(unit.Dp(2))
-
-	// Establish a uniform unit width across all rows so geometry stays aligned.
+// MaxWidthDp returns the natural width of the widest row in dp. Useful for
+// sizing decisions outside of a frame (e.g. window resizing) where no gtx
+// scale factor is available.
+func (vk *VirtualKeyboard) MaxWidthDp() unit.Dp {
 	maxRowSize := 0.0
 	for _, row := range vk.rows {
 		var sum float64
@@ -364,10 +358,30 @@ func (vk *VirtualKeyboard) Layout(th *material.Theme, gtx layout.Context) layout
 			maxRowSize = sum
 		}
 	}
-	if maxRowSize <= 0 {
+	return unit.Dp(maxRowSize * 25)
+}
+
+// MaxWidth returns MaxWidthDp converted to pixels at the current gtx scale.
+// Callers that want to size a sibling widget (e.g. the video monitor) to
+// match the keyboard's footprint can use this without having to render the
+// keyboard.
+func (vk *VirtualKeyboard) MaxWidth(gtx layout.Context) int {
+	return gtx.Dp(vk.MaxWidthDp())
+}
+
+// Layout renders the keyboard at a fixed cell size (a size-1 key is exactly
+// 25×25 dp); the widget's overall dimensions are derived from that, not from
+// the available width. Height is rowsCount * rowH so the caller can place it
+// as a Rigid child.
+func (vk *VirtualKeyboard) Layout(th *material.Theme, gtx layout.Context) layout.Dimensions {
+	rowH := gtx.Dp(unit.Dp(25))
+	unitW := gtx.Dp(unit.Dp(25))
+	gap := gtx.Dp(unit.Dp(2))
+
+	totalW := vk.MaxWidth(gtx)
+	if totalW <= 0 {
 		return layout.Dimensions{}
 	}
-	totalW := int(maxRowSize*float64(unitW) + 0.5)
 
 	// First pass: drain click / toggle events and update optionState. This
 	// must happen before drawing so the same frame reflects the new state.
