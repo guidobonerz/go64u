@@ -1,0 +1,749 @@
+{
+  "maxOptions" : 4,
+  "keyRows" : [ {
+    "keys" : [ {
+      "id" : 0,
+      "type" : "FILLER",
+      "size" : 0.3
+    }, {
+      "id" : 0,
+      "type" : "FUNCTION",
+      "size" : 2,
+      "text" : "F1",
+      "codeOptions" : [ "133", "133", "133", null ]
+    }, {
+      "id" : 0,
+      "type" : "FUNCTION",
+      "size" : 2,
+      "text" : "F2",
+      "codeOptions" : [ "137", "137", "137", null ]
+    }, {
+      "id" : 0,
+      "type" : "FUNCTION",
+      "size" : 2,
+      "text" : "F3",
+      "codeOptions" : [ "134", "134", "134", null ]
+    }, {
+      "id" : 0,
+      "type" : "FUNCTION",
+      "size" : 2,
+      "text" : "F4",
+      "codeOptions" : [ "138", "138", "138", null ]
+    }, {
+      "id" : 0,
+      "type" : "FUNCTION",
+      "size" : 2,
+      "text" : "F5",
+      "codeOptions" : [ "135", "135", "135", null ]
+    }, {
+      "id" : 0,
+      "type" : "FUNCTION",
+      "size" : 2,
+      "text" : "F6",
+      "codeOptions" : [ "139", "139", "139", null ]
+    }, {
+      "id" : 0,
+      "type" : "FUNCTION",
+      "size" : 2,
+      "text" : "F7",
+      "codeOptions" : [ "136", "136", "136", null ]
+    }, {
+      "id" : 0,
+      "type" : "FUNCTION",
+      "size" : 2,
+      "text" : "F8",
+      "codeOptions" : [ "140", "140", "140", null ]
+    }, {
+      "id" : 0,
+      "type" : "OPTION",
+      "name" : "REVERSE",
+      "symbol" : true,
+      "toggleButton" : true,
+      "size" : 2,
+      "index" : 8,
+      "text" : "\uE891",
+      "codeOptions" : [ "146", "18", null, null ]
+    }, {
+      "id" : 0,
+      "type" : "OPTION",
+      "name" : "UPPER_LOWER",
+      "symbol" : true,
+      "toggleButton" : true,
+      "size" : 2,
+      "index" : 4,
+      "text" : "\uE5D7",
+      "codeOptions" : [ "142", "14", null, null ]
+    }, {
+      "id" : 0,
+      "type" : "FILLER",
+      "size" : 0.3
+    }, {
+      "id" : 0,
+      "type" : "FUNCTION",
+      "name" : "RUN",
+      "size" : 3,
+      "text" : "RUN"
+    } ]
+  }, {
+    "keys" : [ {
+      "id" : 0,
+      "type" : "FILLER",
+      "size" : 0.3
+    }, {
+      "id" : 0,
+      "type" : "COLOR",
+      "size" : 1,
+      "index" : 0,
+      "text" : "BLACK",
+      "codeOptions" : [ "144", "144", "144", null ]
+    }, {
+      "id" : 0,
+      "type" : "COLOR",
+      "size" : 1,
+      "index" : 1,
+      "text" : "WHITE",
+      "codeOptions" : [ "5", "5", "5", null ]
+    }, {
+      "id" : 0,
+      "type" : "COLOR",
+      "size" : 1,
+      "index" : 2,
+      "text" : "RED",
+      "codeOptions" : [ "28", "28", "28", null ]
+    }, {
+      "id" : 0,
+      "type" : "COLOR",
+      "size" : 1,
+      "index" : 3,
+      "text" : "CYAN",
+      "codeOptions" : [ "159", "159", "159", null ]
+    }, {
+      "id" : 0,
+      "type" : "COLOR",
+      "size" : 1,
+      "index" : 4,
+      "text" : "PURPLE",
+      "codeOptions" : [ "156", "156", "156", null ]
+    }, {
+      "id" : 0,
+      "type" : "COLOR",
+      "size" : 1,
+      "index" : 5,
+      "text" : "GREEN",
+      "codeOptions" : [ "30", "30", "30", null ]
+    }, {
+      "id" : 0,
+      "type" : "COLOR",
+      "size" : 1,
+      "index" : 6,
+      "text" : "BLUE",
+      "codeOptions" : [ "31", "31", "31", null ]
+    }, {
+      "id" : 0,
+      "type" : "COLOR",
+      "size" : 1,
+      "index" : 7,
+      "text" : "YELLOW",
+      "codeOptions" : [ "158", "158", "158", null ]
+    }, {
+      "id" : 0,
+      "type" : "COLOR",
+      "size" : 1,
+      "index" : 8,
+      "text" : "ORANGE",
+      "codeOptions" : [ "129", "129", "129", null ]
+    }, {
+      "id" : 0,
+      "type" : "COLOR",
+      "size" : 1,
+      "index" : 9,
+      "text" : "BROWN",
+      "codeOptions" : [ "149", "149", "149", null ]
+    }, {
+      "id" : 0,
+      "type" : "COLOR",
+      "size" : 1,
+      "index" : 10,
+      "text" : "LIGHT RED",
+      "codeOptions" : [ "150", "150", "150", null ]
+    }, {
+      "id" : 0,
+      "type" : "COLOR",
+      "size" : 1,
+      "index" : 11,
+      "text" : "DARK GRAY",
+      "codeOptions" : [ "151", "151", "151", null ]
+    }, {
+      "id" : 0,
+      "type" : "COLOR",
+      "size" : 1,
+      "index" : 12,
+      "text" : "GRAY",
+      "codeOptions" : [ "152", "152", "152", null ]
+    }, {
+      "id" : 0,
+      "type" : "COLOR",
+      "size" : 1,
+      "index" : 13,
+      "text" : "LIGHT GREEN",
+      "codeOptions" : [ "153", "153", "153", null ]
+    }, {
+      "id" : 0,
+      "type" : "COLOR",
+      "size" : 1,
+      "index" : 14,
+      "text" : "LIGHT BLUE",
+      "codeOptions" : [ "154", "154", "154", null ]
+    }, {
+      "id" : 0,
+      "type" : "COLOR",
+      "size" : 1,
+      "index" : 15,
+      "text" : "LIGHT GRAY",
+      "codeOptions" : [ "155", "155", "155", null ]
+    }, {
+      "id" : 0,
+      "type" : "FUNCTION",
+      "symbol" : true,
+      "name" : "CLEAR",
+      "size" : 2,
+      "text" : "\uE3C1",
+      "codeOptions" : [ "147", "147", "147", null ]
+    }, {
+      "id" : 0,
+      "type" : "FUNCTION",
+      "symbol" : true,
+      "name" : "HOME",
+      "size" : 2,
+      "text" : "\uE88A",
+      "codeOptions" : [ "19", "19", "19", null ]
+    }, {
+      "id" : 0,
+      "type" : "FILLER",
+      "size" : 0.3
+    }, {
+      "id" : 0,
+      "type" : "FUNCTION",
+      "name" : "LIST",
+      "size" : 3,
+      "text" : "LIST"
+    } ]
+  }, {
+    "keys" : [ {
+      "id" : 0,
+      "type" : "FILLER",
+      "size" : 0.3
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "\uEE1F",
+      "codeOptions" : [ "95", "95", "95", null ],
+      "displayOptions" : [ [ "\uEE1F", "\uEF1F", "\uEE9F", "\uEF9F" ], [ "\uEE1F", "\uEF1F", "\uEE9F", "\uEF9F" ], [ "\uEE1F", "\uEF1F", "\uEE9F", "\uEF9F" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "1",
+      "codeOptions" : [ "49", "33", "33", null ],
+      "displayOptions" : [ [ "\uEE31", "\uE131", "\uE231", "\uE331" ], [ "\uE021", "\uE121", "\uE221", "\uE321" ], [ "\uE021", "\uE121", "\uE221", "\uE321" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "2",
+      "codeOptions" : [ "50", "34", "34", null ],
+      "displayOptions" : [ [ "\uEE32", "\uE132", "\uE232", "\uE332" ], [ "\uE022", "\uE122", "\uE222", "\uE322" ], [ "\uE022", "\uE122", "\uE222", "\uE322" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "3",
+      "codeOptions" : [ "51", "35", "35", null ],
+      "displayOptions" : [ [ "\uEE33", "\uE133", "\uE233", "\uE333" ], [ "\uE023", "\uE123", "\uE223", "\uE323" ], [ "\uE023", "\uE123", "\uE223", "\uE323" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "4",
+      "codeOptions" : [ "52", "36", "36", null ],
+      "displayOptions" : [ [ "\uEE34", "\uE134", "\uE234", "\uE334" ], [ "\uE024", "\uE124", "\uE224", "\uE324" ], [ "\uE024", "\uE124", "\uE224", "\uE324" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "5",
+      "codeOptions" : [ "53", "37", "37", null ],
+      "displayOptions" : [ [ "\uEE35", "\uE135", "\uE235", "\uE335" ], [ "\uE025", "\uE125", "\uE225", "\uE325" ], [ "\uE025", "\uE125", "\uE225", "\uE325" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "6",
+      "codeOptions" : [ "54", "38", "38", null ],
+      "displayOptions" : [ [ "\uEE36", "\uE136", "\uE236", "\uE336" ], [ "\uE026", "\uE126", "\uE226", "\uE326" ], [ "\uE026", "\uE126", "\uE226", "\uE326" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "7",
+      "codeOptions" : [ "55", "39", "39", null ],
+      "displayOptions" : [ [ "\uEE37", "\uE137", "\uE237", "\uE337" ], [ "\uE027", "\uE127", "\uE227", "\uE327" ], [ "\uE027", "\uE127", "\uE227", "\uE327" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "8",
+      "codeOptions" : [ "56", "40", "40", null ],
+      "displayOptions" : [ [ "\uEE38", "\uE138", "\uE238", "\uE338" ], [ "\uE028", "\uE128", "\uE228", "\uE328" ], [ "\uE028", "\uE128", "\uE228", "\uE328" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "9",
+      "codeOptions" : [ "57", "41", "41", null ],
+      "displayOptions" : [ [ "\uEE39", "\uE139", "\uE239", "\uE339" ], [ "\uE029", "\uE129", "\uE229", "\uE329" ], [ "\uE029", "\uE129", "\uE229", "\uE329" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "0",
+      "codeOptions" : [ "48", "48", "48", null ],
+      "displayOptions" : [ [ "\uEE30", "\uE130", "\uE230", "\uE330" ], [ "\uE030", "\uE130", "\uE230", "\uE330" ], [ "\uE030", "\uE130", "\uE230", "\uE330" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "+",
+      "codeOptions" : [ "43", "123", "166", null ],
+      "displayOptions" : [ [ "\uEE2B", "\uE12B", "\uE22B", "\uE32B" ], [ "\uE07B", "\uE17B", "\uE27B", "\uE37B" ], [ "\uE0A6", "\uE1A6", "\uE2A6", "\uE3A6" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "-",
+      "codeOptions" : [ "45", "180", "124", null ],
+      "displayOptions" : [ [ "\uEE2D", "\uE12D", "\uE22D", "\uE32D" ], [ "\uE067", "\uE167", "\uE267", "\uE367" ], [ "\uE07C", "\uE17C", "\uE27C", "\uE37C" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "\uEE1C",
+      "codeOptions" : [ "92", "168", "169", null ],
+      "displayOptions" : [ [ "\uEE1C", "\uE15C", "\uE25C", "\uE35C" ], [ "\uE0A9", "\uE1A9", "\uE2A9", "\uE3A9" ], [ "\uE0A8", "\uE1A8", "\uE2A8", "\uE3A8" ] ]
+    }, {
+      "id" : 0,
+      "type" : "FILLER",
+      "size" : 2
+    }, {
+      "id" : 0,
+      "type" : "FUNCTION",
+      "name" : "INSERT",
+      "size" : 2,
+      "symbol" : true,
+      "text" : "\uE93F",
+      "codeOptions" : [ "148", "148", "148", null ]
+    }, {
+      "id" : 0,
+      "type" : "FUNCTION",
+      "name" : "DELETE",
+      "symbol" : true,
+      "size" : 2,
+      "text" : "\uE317",
+      "codeOptions" : [ "20", "20", "20", null ]
+    }, {
+      "id" : 0,
+      "type" : "FILLER",
+      "size" : 0.3
+    }, {
+      "id" : 0,
+      "type" : "FUNCTION",
+      "name" : "DIR",
+      "size" : 3,
+      "text" : "DIR"
+    } ]
+  }, {
+    "keys" : [ {
+      "id" : 0,
+      "type" : "FILLER",
+      "size" : 0.3
+    }, {
+      "id" : 0,
+      "type" : "OPTION",
+      "index" : 16,
+      "toggleButton" : true,
+      "size" : 1.5,
+      "text" : "CTRL",
+      "codeOptions" : [ null, null, null, null ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "Q",
+      "codeOptions" : [ "81", "113", "171", null ],
+      "displayOptions" : [ [ "\uE051", "\uE151", "\uE251", "\uE351" ], [ "\uE071", "\uE171", "\uE271", "\uE371" ], [ "\uE0AB", "\uE1AB", "\uE2AB", "\uE3AB" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "W",
+      "codeOptions" : [ "87", "215", "179", null ],
+      "displayOptions" : [ [ "\uE057", "\uE157", "\uE257", "\uE357" ], [ "\uE077", "\uE177", "\uE277", "\uE377" ], [ "\uE0F3", "\uE1F3", "\uE2F3", "\uE3F3" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "E",
+      "codeOptions" : [ "69", "197", "177", null ],
+      "displayOptions" : [ [ "\uE045", "\uE145", "\uE245", "\uE345" ], [ "\uE065", "\uE165", "\uE265", "\uE365" ], [ "\uE0F1", "\uE1F1", "\uE2F1", "\uE3F1" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "R",
+      "codeOptions" : [ "82", "210", "178", null ],
+      "displayOptions" : [ [ "\uE052", "\uE152", "\uE252", "\uE352" ], [ "\uE072", "\uE172", "\uE272", "\uE372" ], [ "\uE0F2", "\uE1F2", "\uE2F2", "\uE3F2" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "T",
+      "codeOptions" : [ "84", "212", "163", null ],
+      "displayOptions" : [ [ "\uE054", "\uE154", "\uE254", "\uE354" ], [ "\uE067", "\uE167", "\uE267", "\uE367" ], [ "\uE0A3", "\uE1A3", "\uE2A3", "\uE3A3" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "Y",
+      "codeOptions" : [ "89", "217", "183", null ],
+      "displayOptions" : [ [ "\uE059", "\uE159", "\uE259", "\uE359" ], [ "\uE079", "\uE179", "\uE279", "\uE379" ], [ "\uE0F7", "\uE1F7", "\uE2F7", "\uE3F7" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "U",
+      "codeOptions" : [ "85", "213", "184", null ],
+      "displayOptions" : [ [ "\uE055", "\uE155", "\uE255", "\uE355" ], [ "\uE075", "\uE175", "\uE275", "\uE375" ], [ "\uE0F8", "\uE1F8", "\uE2F8", "\uE3F8" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "I",
+      "codeOptions" : [ "73", "201", "162", null ],
+      "displayOptions" : [ [ "\uE049", "\uE149", "\uE249", "\uE349" ], [ "\uE069", "\uE169", "\uE269", "\uE369" ], [ "\uE0E2", "\uE1E2", "\uE2E2", "\uE3E2" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "O",
+      "codeOptions" : [ "79", "207", "185", null ],
+      "displayOptions" : [ [ "\uE04F", "\uE14F", "\uE24F", "\uE34F" ], [ "\uE06F", "\uE16F", "\uE26F", "\uE36F" ], [ "\uE0F9", "\uE1F9", "\uE2F9", "\uE3F9" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "P",
+      "codeOptions" : [ "80", "208", "175", null ],
+      "displayOptions" : [ [ "\uE050", "\uE150", "\uE250", "\uE350" ], [ "\uE070", "\uE170", "\uE270", "\uE370" ], [ "\uE0AF", "\uE1AF", "\uE2AF", "\uE3AF" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "@",
+      "codeOptions" : [ "64", "186", "164", null ],
+      "displayOptions" : [ [ "\uE040", "\uE140", "\uE240", "\uE340" ], [ "\uE0FA", "\uE1FA", "\uE2FA", "\uE3FA" ], [ "\uE0A4", "\uE1A4", "\uE2A4", "\uE3A4" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "*",
+      "codeOptions" : [ "42", "192", "223", null ],
+      "displayOptions" : [ [ "\uE02A", "\uE12A", "\uE22A", "\uE32A" ], [ "\uE060", "\uE160", "\uE260", "\uE360" ], [ "\uE07F", "\uE17F", "\uE27F", "\uE37F" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "\uE05E",
+      "codeOptions" : [ "94", "222", "222", null ],
+      "displayOptions" : [ [ "\uE05E", "\uE15E", "\uE25E", "\uE35E" ], [ "\uE07E", "\uE17E", "\uE27E", "\uE37E" ], [ "\uE07E", "\uE17E", "\uE27E", "\uE37E" ] ]
+    }, {
+      "id" : 0,
+      "type" : "FILLER",
+      "size" : 5.8
+    }, {
+      "id" : 0,
+      "type" : "FUNCTION",
+      "name" : "LOAD *",
+      "size" : 4,
+      "text" : "LOAD *"
+    } ]
+  }, {
+    "keys" : [ {
+      "id" : 0,
+      "type" : "FILLER",
+      "size" : 2
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "A",
+      "codeOptions" : [ "65", "193", "176", null ],
+      "displayOptions" : [ [ "\uE041", "\uE141", "\uE241", "\uE341" ], [ "\uE061", "\uE161", "\uE261", "\uE361" ], [ "\uE0B0", "\uE1B0", "\uE2B0", "\uE3B0" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "S",
+      "codeOptions" : [ "83", "211", "174", null ],
+      "displayOptions" : [ [ "\uE053", "\uE153", "\uE253", "\uE353" ], [ "\uE073", "\uE173", "\uE273", "\uE373" ], [ "\uE0AE", "\uE1AE", "\uE2AE", "\uE3AE" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "D",
+      "codeOptions" : [ "68", "196", "172", null ],
+      "displayOptions" : [ [ "\uE044", "\uE144", "\uE244", "\uE344" ], [ "\uE0C5", "\uE1C5", "\uE2C5", "\uE3C5" ], [ "\uE0EC", "\uE1EC", "\uE2EC", "\uE3EC" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "F",
+      "codeOptions" : [ "70", "198", "187", null ],
+      "displayOptions" : [ [ "\uE046", "\uE146", "\uE246", "\uE346" ], [ "\uE066", "\uE166", "\uE266", "\uE366" ], [ "\uE0FB", "\uE1FB", "\uE2FB", "\uE3FB" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "G",
+      "codeOptions" : [ "71", "199", "165", null ],
+      "displayOptions" : [ [ "\uE047", "\uE147", "\uE247", "\uE347" ], [ "\uE067", "\uE167", "\uE267", "\uE367" ], [ "\uE0A5", "\uE1A5", "\uE2A5", "\uE3A5" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "H",
+      "codeOptions" : [ "72", "200", "180", null ],
+      "displayOptions" : [ [ "\uE048", "\uE148", "\uE248", "\uE348" ], [ "\uE068", "\uE168", "\uE268", "\uE368" ], [ "\uE0B5", "\uE1B5", "\uE2B5", "\uE3B5" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "J",
+      "codeOptions" : [ "74", "202", "181", null ],
+      "displayOptions" : [ [ "\uE04A", "\uE14A", "\uE24A", "\uE34A" ], [ "\uE06A", "\uE16A", "\uE26A", "\uE36A" ], [ "\uE0B5", "\uE1B5", "\uE2B5", "\uE3B5" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "K",
+      "codeOptions" : [ "75", "203", "161", null ],
+      "displayOptions" : [ [ "\uE04B", "\uE14B", "\uE24B", "\uE34B" ], [ "\uE06B", "\uE16B", "\uE26B", "\uE36B" ], [ "\uE0A1", "\uE1A1", "\uE2A1", "\uE3A1" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "L",
+      "codeOptions" : [ "76", "204", "182", null ],
+      "displayOptions" : [ [ "\uE04C", "\uE14C", "\uE24C", "\uE34C" ], [ "\uE06C", "\uE16C", "\uE26C", "\uE36C" ], [ "\uE0B6", "\uE1B6", "\uE2B6", "\uE3B6" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : ":",
+      "codeOptions" : [ "58", "91", "91", null ],
+      "displayOptions" : [ [ "\uE03A", "\uE13A", "\uE23A", "\uE33A" ], [ "\uE05B", "\uE15B", "\uE25B", "\uE35B" ], [ "\uE05B", "\uE15B", "\uE25B", "\uE35B" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : ";",
+      "codeOptions" : [ "59", "93", "93", null ],
+      "displayOptions" : [ [ "\uE03B", "\uE13B", "\uE23B", "\uE33B" ], [ "\uE05D", "\uE15D", "\uE25D", "\uE35D" ], [ "\uE05D", "\uE15D", "\uE25D", "\uE35D" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "=",
+      "codeOptions" : [ "61", "61", "61", null ],
+      "displayOptions" : [ [ "\uE03D", "\uE13D", "\uE23D", "\uE33D" ], [ "\uE03D", "\uE13D", "\uE23D", "\uE33D" ], [ "\uE03D", "\uE13D", "\uE23D", "\uE33D" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "symbol" : true,
+      "name" : "RETURN",
+      "size" : 2.3,
+      "text" : "\uE31B",
+      "codeOptions" : [ "13", "141", "141", null ],
+      "displayOptions" : [ [ "\uE31B", "\uE31B", "\uE31B", "\uE31B" ], [ "\uE31B", "\uE31B", "\uE31B", "\uE31B" ], [ "\uE31B", "\uE31B", "\uE31B", "\uE31B" ] ]
+    }, {
+      "id" : 0,
+      "type" : "OPTION",
+      "toggleButton" : true,
+      "name" : "FRAME_COLOR",
+      "size" : 2,
+      "index" : 32,
+      "text" : "FC"
+    }, {
+      "id" : 0,
+      "type" : "OPTION",
+      "toggleButton" : true,
+      "name" : "FRAME_COLOR",
+      "size" : 2,
+      "index" : 64,
+      "text" : "BC"
+    } ]
+  }, {
+    "keys" : [ {
+      "id" : 0,
+      "type" : "OPTION",
+      "symbol" : true,
+      "name" : "COMMODORE",
+      "index" : 2,
+      "toggleButton" : true,
+      "size" : 1,
+      "text" : "\uE7F2",
+      "codeOptions" : [ null, null, null, null ]
+    }, {
+      "id" : 0,
+      "type" : "OPTION",
+      "index" : 1,
+      "symbol" : true,
+      "name" : "SHIFT",
+      "toggleButton" : true,
+      "size" : 1.5,
+      "text" : "\uE5D8",
+      "codeOptions" : [ null, null, null, null ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "Z",
+      "codeOptions" : [ "90", "218", "173", null ],
+      "displayOptions" : [ [ "\uE05A", "\uE15A", "\uE25A", "\uE35A" ], [ "\uE07A", "\uE17A", "\uE27A", "\uE37A" ], [ "\uE0AD", "\uE1AD", "\uE2AD", "\uE3AD" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "X",
+      "codeOptions" : [ "88", "216", "189", null ],
+      "displayOptions" : [ [ "\uE058", "\uE158", "\uE258", "\uE358" ], [ "\uE078", "\uE178", "\uE278", "\uE378" ], [ "\uE0BD", "\uE1BD", "\uE2BD", "\uE3BD" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "C",
+      "codeOptions" : [ "67", "195", "188", null ],
+      "displayOptions" : [ [ "\uE043", "\uE143", "\uE243", "\uE343" ], [ "\uE064", "\uE164", "\uE264", "\uE364" ], [ "\uE0BC", "\uE1BC", "\uE2BC", "\uE3BC" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "V",
+      "codeOptions" : [ "86", "214", "190", null ],
+      "displayOptions" : [ [ "\uE056", "\uE156", "\uE256", "\uE356" ], [ "\uE076", "\uE176", "\uE276", "\uE376" ], [ "\uE0BE", "\uE1BE", "\uE2BE", "\uE3BE" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "B",
+      "codeOptions" : [ "66", "194", "191", null ],
+      "displayOptions" : [ [ "\uE042", "\uE142", "\uE242", "\uE342" ], [ "\uE067", "\uE167", "\uE267", "\uE367" ], [ "\uE0BF", "\uE1BF", "\uE2BF", "\uE3BF" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "N",
+      "codeOptions" : [ "78", "206", "170", null ],
+      "displayOptions" : [ [ "\uE04E", "\uE14E", "\uE24E", "\uE34E" ], [ "\uE06E", "\uE16E", "\uE26E", "\uE36E" ], [ "\uE0F6", "\uE1F6", "\uE2F6", "\uE3F6" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "M",
+      "codeOptions" : [ "77", "205", "167", null ],
+      "displayOptions" : [ [ "\uE04D", "\uE14D", "\uE24D", "\uE34D" ], [ "\uE06D", "\uE16D", "\uE26D", "\uE36D" ], [ "\uE0AA", "\uE1AA", "\uE2AA", "\uE3AA" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : ",",
+      "codeOptions" : [ "44", "60", "60", null ],
+      "displayOptions" : [ [ "\uE02C", "\uE12C", "\uE22C", "\uE32C" ], [ "\uE03C", "\uE13C", "\uE23C", "\uE33C" ], [ "\uE03C", "\uE13C", "\uE23C", "\uE33C" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : ".",
+      "codeOptions" : [ "46", "62", "62", null ],
+      "displayOptions" : [ [ "\uE02E", "\uE12E", "\uE22E", "\uE32E" ], [ "\uE03E", "\uE13E", "\uE23E", "\uE33E" ], [ "\uE03E", "\uE13E", "\uE23E", "\uE33E" ] ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 1,
+      "text" : "/",
+      "codeOptions" : [ "47", "63", "63", null ],
+      "displayOptions" : [ [ "\uE02F", "\uE12F", "\uE22F", "\uE32F" ], [ "\uE03F", "\uE13F", "\uE23F", "\uE33F" ], [ "\uE03F", "\uE13F", "\uE23F", "\uE33F" ] ]
+    }, {
+      "id" : 0,
+      "type" : "FILLER",
+      "size" : 1.75
+    }, {
+      "id" : 0,
+      "type" : "FUNCTION",
+      "name" : "UP",
+      "symbol" : true,
+      "size" : 1,
+      "text" : "\uE316",
+      "codeOptions" : [ "145", "145", "145", null ]
+    } ]
+  }, {
+    "keys" : [ {
+      "id" : 0,
+      "type" : "FILLER",
+      "size" : 2.66
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "size" : 9,
+      "text" : "SPACE",
+      "codeOptions" : [ "32", "160", "160", null ]
+    }, {
+      "id" : 0,
+      "type" : "FILLER",
+      "size" : 1.6
+    }, {
+      "id" : 0,
+      "type" : "FUNCTION",
+      "name" : "LEFT",
+      "symbol" : true,
+      "size" : 1,
+      "text" : "\uE314",
+      "codeOptions" : [ "157", "157", "157", null ]
+    }, {
+      "id" : 0,
+      "type" : "FUNCTION",
+      "name" : "DOWN",
+      "symbol" : true,
+      "size" : 1,
+      "text" : "\uE313",
+      "codeOptions" : [ "17", "17", "17", null ]
+    }, {
+      "id" : 0,
+      "type" : "FUNCTION",
+      "name" : "RIGHT",
+      "symbol" : true,
+      "size" : 1,
+      "text" : "\uE315",
+      "codeOptions" : [ "29", "29", "29", null ]
+    }, {
+      "id" : 0,
+      "type" : "KEY",
+      "symbol" : true,
+      "size" : 4,
+      "name" : "RUN/STOP",
+      "text" : "RUN/STOP",
+      "codeOptions" : [ "3", "131", "131 ", null ],
+      "displayOptions" : [ [ "\uE047", "\uE047", "\uE047", "\uE047" ], [ "\uE566", "\uE566", "\uE566", "\uE566" ], [ "\uE047", "\uE047", "\uE047", "\uE047" ] ]
+    } ]
+  } ]
+}
