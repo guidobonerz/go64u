@@ -15,6 +15,7 @@ import (
 
 	"drazil.de/go64u/commands"
 	"drazil.de/go64u/config"
+	"drazil.de/go64u/fonts"
 	"drazil.de/go64u/imaging"
 	"drazil.de/go64u/network"
 	"drazil.de/go64u/streams"
@@ -22,6 +23,10 @@ import (
 
 	"gioui.org/app"
 	"gioui.org/f32"
+	"gioui.org/font"
+	"gioui.org/font/opentype"
+	"gioui.org/io/event"
+	"gioui.org/io/key"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
@@ -46,6 +51,12 @@ type guiApp struct {
 	toolbarHeightPx int    // measured toolbar height in physical pixels, for drop-hit geometry
 	dropMu          sync.Mutex
 	dropHits        []dropHit // rectangles (client-area px) of each visible monitor cell, updated each frame
+
+	keyboard        *VirtualKeyboard
+	keyboardVisible bool
+	keyboardBtn     widget.Clickable
+	lastWindowH     unit.Dp  // last height passed to a.window.Option, to skip redundant resizes
+	keyFocusTag     struct{} // unique per-app tag for the window-level physical-keyboard handler
 }
 
 // dropHit maps a monitor cell's on-screen rectangle (in Windows client-area
@@ -132,6 +143,7 @@ var (
 	iconPause, _         = widget.NewIcon(icons.AVPause)
 	iconReset, _         = widget.NewIcon(icons.NavigationRefresh)
 	iconPower, _         = widget.NewIcon(icons.ActionPowerSettingsNew)
+	iconKeyboard, _      = widget.NewIcon(icons.HardwareKeyboard)
 	colorRecording       = color.NRGBA{R: 255, G: 40, B: 40, A: 255}
 	colorCasting         = color.NRGBA{R: 255, G: 215, B: 0, A: 255}
 )
@@ -188,8 +200,17 @@ func newApp() *guiApp {
 	}
 	<-readyChan
 
-	// Use system sans-serif fonts (Helvetica / Arial / Segoe UI depending on platform)
-	shaper := text.NewShaper()
+	// Use system sans-serif fonts (Helvetica / Arial / Segoe UI depending on
+	// platform), and additionally register the embedded C64 Pro Mono face under
+	// the C64ProTypeface name so the virtual keyboard can pick it up for
+	// PETSCII glyphs while normal labels keep using the default system font.
+	c64Face, err := opentype.Parse(fonts.C64ProMonoSTYLE)
+	if err != nil {
+		panic(err)
+	}
+	shaper := text.NewShaper(text.WithCollection([]font.FontFace{
+		{Font: font.Font{Typeface: C64ProTypeface}, Face: c64Face},
+	}))
 
 	th := material.NewTheme()
 	th.Shaper = shaper
@@ -207,7 +228,8 @@ func newApp() *guiApp {
 
 	w := new(app.Window)
 
-	// 768x544 image pixels + room for audio panel + insets
+	// Initial size matches the keyboard-visible default in layoutTopToolbar:
+	// toolbar + monitor + keyboard + footer with no extra space below.
 	w.Option(app.Title("go64u - monitor"), app.Size(unit.Dp(800), unit.Dp(680)))
 
 	// Start with the config's selected device highlighted (or first device)
@@ -220,13 +242,37 @@ func newApp() *guiApp {
 		}
 	}
 
-	return &guiApp{
+	a := &guiApp{
 		window:      w,
 		theme:       th,
 		otoCtx:      otoCtx,
 		devices:     devices,
 		selectedIdx: selectedIdx,
 	}
+
+	// Build the virtual keyboard. The listener is a stub for now — wiring it
+	// to a U64 endpoint (e.g. POST /v1/machine/typetext) is a follow-up.
+	var kb *VirtualKeyboard
+	kb, err = NewVirtualKeyboard(func(ev KeyEvent) {
+		fmt.Printf("vkb: %s/%q -> code=%d state=0x%02x\n", ev.Key.Type, ev.Key.Text, ev.Code, kb.OptionState())
+		sendKeyboardSequence(0xff03, []byte{byte(ev.Code) & 0xff})
+	})
+	if err != nil {
+		panic(err)
+	}
+	a.keyboard = kb
+	a.keyboardVisible = true
+	return a
+}
+
+func sendKeyboardSequence(command uint16, sequence []byte) {
+	length := []byte{0x00, 0x00}
+	length[0] = byte(len(sequence) + 2)
+	payload := make([]byte, len(sequence)+4)
+	copy(payload[:], util.GetWordArray(command))
+	copy(payload[2:], length[:])
+	copy(payload[4:], sequence[:])
+	network.SendTcpData(payload, "10.100.200.230")
 }
 
 func buildDeviceList() []deviceUI {
@@ -333,7 +379,80 @@ func (a *guiApp) run() {
 	}
 }
 
+// syncWindowHeight resizes the gioui window so its height tracks what's
+// actually rendered: the toolbar plus an optional monitor row plus an optional
+// keyboard plus the separator + footer. Called once per frame so flips of
+// videoActive / keyboardVisible take effect immediately.
+//
+// Sizes are conservative estimates of the per-section heights at the default
+// 800dp window width; if the cards column ends up taller than the right
+// column, gioui will honor that and the window will simply contain a small
+// amount of slack — better than baking the cards count in here.
+func (a *guiApp) syncWindowHeight() {
+	const (
+		insetH      = unit.Dp(20) // top + bottom
+		toolbarH    = unit.Dp(80)
+		topSpacerH  = unit.Dp(10)
+		monitorH    = unit.Dp(347) // cellH for 1 monitor at 800dp width
+		kbSpacerH   = unit.Dp(10)
+		kbH         = unit.Dp(7 * 25) // 7 rows × 25dp cells
+		botSpacerH  = unit.Dp(6)
+		separatorH  = unit.Dp(1)
+		footSpacerH = unit.Dp(4)
+		footerH     = unit.Dp(20)
+	)
+
+	hasActiveVideo := false
+	for i := range a.devices {
+		if a.devices[i].videoActive {
+			hasActiveVideo = true
+			break
+		}
+	}
+
+	h := insetH + toolbarH + topSpacerH + botSpacerH + separatorH + footSpacerH + footerH
+	if hasActiveVideo {
+		h += monitorH
+	}
+	if a.keyboardVisible {
+		h += kbSpacerH + kbH
+	}
+
+	if h == a.lastWindowH {
+		return
+	}
+	a.lastWindowH = h
+	a.window.Option(app.Size(unit.Dp(800), h))
+}
+
 func (a *guiApp) layoutRoot(gtx layout.Context) layout.Dimensions {
+	// Resize the window to fit current content (monitor + optional keyboard)
+	// before painting the frame, so the bottom of the window always lines up
+	// just below the footer with no leftover empty space.
+	a.syncWindowHeight()
+
+	// Physical-keyboard input: register our focus tag with the input router,
+	// drain any key events queued for it, and re-request focus so the tag
+	// keeps receiving events even after the user clicks other widgets.
+	event.Op(gtx.Ops, &a.keyFocusTag)
+	for {
+		ev, ok := gtx.Event(
+			key.FocusFilter{Target: &a.keyFocusTag},
+			key.Filter{Focus: &a.keyFocusTag, Optional: key.ModShift | key.ModCtrl | key.ModAlt | key.ModCommand},
+		)
+		if !ok {
+			break
+		}
+		ke, ok := ev.(key.Event)
+		if !ok || ke.State != key.Press || a.keyboard == nil {
+			continue
+		}
+		a.keyboard.HandlePhysicalKey(ke.Name, ke.Modifiers)
+	}
+	if !gtx.Focused(&a.keyFocusTag) {
+		gtx.Execute(key.FocusCmd{Tag: &a.keyFocusTag})
+	}
+
 	// Dark background
 	defer clip.Rect{Max: gtx.Constraints.Max}.Push(gtx.Ops).Pop()
 	paint.Fill(gtx.Ops, colorBackground)
@@ -357,7 +476,10 @@ func (a *guiApp) layoutRoot(gtx layout.Context) layout.Dimensions {
 			}),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
 			// Middle: horizontal split -- cards on the left, video monitor on the right (monitor mode).
-			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			// Rigid (not Flexed) so the row only takes its natural height; any
+			// remaining vertical space is absorbed by the trailing Flexed below
+			// the footer instead of opening a gap above it.
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				hasActiveVideo := false
 				for i := range a.devices {
 					if a.devices[i].videoActive {
@@ -388,16 +510,40 @@ func (a *guiApp) layoutRoot(gtx layout.Context) layout.Dimensions {
 					}),
 					// Spacer between left cards and right monitor
 					layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
-					// Right column: video monitor (only when active in monitor mode)
+					// Right column: video monitor on top, virtual keyboard
+					// stacked beneath it. Keeping them as siblings in a
+					// vertical flex prevents the monitor's fixed-aspect
+					// rectangle from overlapping the keyboard.
 					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-						if hasActiveVideo {
-							return a.layoutVideoMonitor(gtx)
-						}
-						return layout.Dimensions{}
+						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								if hasActiveVideo {
+									return a.layoutVideoMonitor(gtx)
+								}
+								return layout.Dimensions{}
+							}),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								if !a.keyboardVisible || a.keyboard == nil {
+									return layout.Dimensions{}
+								}
+								return layout.Inset{Top: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+									return a.keyboard.Layout(a.theme, gtx)
+								})
+							}),
+						)
 					}),
 				)
 			}),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
+			// Thin horizontal separator above the footer.
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				h := gtx.Dp(unit.Dp(1))
+				sz := image.Pt(gtx.Constraints.Max.X, h)
+				defer clip.Rect{Max: sz}.Push(gtx.Ops).Pop()
+				paint.Fill(gtx.Ops, colorSeparator)
+				return layout.Dimensions{Size: sz}
+			}),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
 			// Footer: hint text for hovered toolbar icons
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return a.layoutFooter(gtx)
@@ -454,6 +600,13 @@ func (a *guiApp) layoutTopToolbar(gtx layout.Context) layout.Dimensions {
 	recClicked := dev.recBtn.Clicked(gtx)
 	castClicked := dev.castBtn.Clicked(gtx)
 
+	// The keyboard toggle is independent of device-online state — drain it
+	// up front and apply unconditionally. The window resize follows from
+	// syncWindowHeight, called once per frame in layoutRoot.
+	if a.keyboardBtn.Clicked(gtx) {
+		a.keyboardVisible = !a.keyboardVisible
+	}
+
 	// Update footer hint from current hover state.
 	a.hint = ""
 	switch {
@@ -479,6 +632,8 @@ func (a *guiApp) layoutTopToolbar(gtx layout.Context) layout.Dimensions {
 		a.hint = "Reset the machine"
 	case dev.poweroffBtn.Hovered():
 		a.hint = "Power off the machine"
+	case a.keyboardBtn.Hovered():
+		a.hint = "Toggle virtual keyboard"
 	}
 
 	if enabled {
@@ -623,6 +778,11 @@ func (a *guiApp) layoutTopToolbar(gtx layout.Context) layout.Dimensions {
 							return layoutGrayIcon(gtx, iconPause, unit.Dp(28))
 						}
 						return a.layoutActionIconButton(gtx, &dev.pauseBtn, iconPause, dev.paused)
+					}),
+
+					layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return a.layoutActionIconButton(gtx, &a.keyboardBtn, iconKeyboard, a.keyboardVisible)
 					}),
 
 					layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
