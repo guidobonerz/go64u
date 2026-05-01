@@ -4,7 +4,7 @@ go 1.25.5
 
 require (
 	gioui.org v0.9.0
-	github.com/asticode/go-astiav v0.40.0
+	github.com/asticode/go-astiav v0.44.0
 	github.com/dustin/go-humanize v1.0.1
 	github.com/ebitengine/oto/v3 v3.4.0
 	github.com/fogleman/gg v1.3.0
