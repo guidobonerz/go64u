@@ -1,184 +1,19 @@
-name: Release
+# This file is part of FFmpeg.
+#
+# FFmpeg is free software; you can redistribute it and/or modify it under the terms of the GNU Lesser General Public License as published by the Free Software Foundation; either version 2.1 of the License, or (at your option) any later version.
+#
+# FFmpeg is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License along with FFmpeg; if not, write to the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 
-on:
-  push:
-    tags:
-      - 'v*'
-  workflow_dispatch:
+configure_flags="..."
 
-permissions:
-  contents: write
+# Your other configuration flags
 
-env:
-  FFMPEG_VERSION: "6.1"  # Cache-Key – bei Änderung wird FFmpeg neu gebaut
+# FFmpeg configure step
+./configure \ 
+    --enable-filter=buffersink \ 
+    --enable-filter=format \ 
+    $configure_flags
 
-jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-13
-            goos: darwin
-            goarch: amd64
-          - os: macos-14
-            goos: darwin
-            goarch: arm64
-          - os: ubuntu-latest
-            goos: linux
-            goarch: amd64
-
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: stable
-
-      # --- FFmpeg static build mit Caching ---
-
-      - name: Cache FFmpeg build
-        id: cache-ffmpeg
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}/ffmpeg-install
-          key: ffmpeg-${{ env.FFMPEG_VERSION }}-${{ matrix.os }}-${{ matrix.goarch }}-v2
-
-      - name: Install build dependencies (Linux)
-        if: matrix.goos == 'linux' && steps.cache-ffmpeg.outputs.cache-hit != 'true'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            autoconf automake build-essential cmake git libtool \
-            pkg-config nasm yasm libwayland-dev libxcb1-dev
-
-      - name: Install build dependencies (macOS)
-        if: matrix.goos == 'darwin' && steps.cache-ffmpeg.outputs.cache-hit != 'true'
-        run: |
-          brew install nasm yasm pkg-config automake
-
-      - name: Build FFmpeg from source
-        if: steps.cache-ffmpeg.outputs.cache-hit != 'true'
-        run: |
-          set -euxo pipefail
-          INSTALL_DIR="${{ github.workspace }}/ffmpeg-install"
-          mkdir -p "$INSTALL_DIR"
-
-          curl -L "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" \
-            | tar xJ
-          cd "ffmpeg-${FFMPEG_VERSION}"
-
-          ./configure \
-            --prefix="$INSTALL_DIR" \
-            --pkg-config-flags="--static" \
-            --enable-static \
-            --disable-shared \
-            --disable-programs \
-            --disable-doc \
-            --disable-debug \
-            --enable-pic
-
-          make -j$(getconf _NPROCESSORS_ONLN)
-          make install
-
-      # --- Go build mit statisch gelinktem FFmpeg ---
-
-      - name: Build Go binary (Linux)
-        if: matrix.goos == 'linux'
-        env:
-          CGO_ENABLED: 1
-          PKG_CONFIG_PATH: ${{ github.workspace }}/ffmpeg-install/lib/pkgconfig
-        run: |
-          mkdir -p dist
-          go build \
-            -ldflags="-s -w -linkmode external -extldflags '-static'" \
-            -o dist/myapp-linux-amd64
-
-      - name: Build Go binary (macOS)
-        if: matrix.goos == 'darwin'
-        env:
-          CGO_ENABLED: 1
-          PKG_CONFIG_PATH: ${{ github.workspace }}/ffmpeg-install/lib/pkgconfig
-        run: |
-          mkdir -p dist
-          go build \
-            -ldflags="-s -w" \
-            -o dist/myapp-darwin-${{ matrix.goarch }}
-
-      # --- Verifikation ---
-
-      - name: Verify static linking (Linux)
-        if: matrix.goos == 'linux'
-        run: |
-          file dist/myapp-linux-amd64
-          ldd dist/myapp-linux-amd64 || echo "fully static (no dynamic deps)"
-
-      - name: Verify FFmpeg is statically linked (macOS)
-        if: matrix.goos == 'darwin'
-        run: |
-          file dist/myapp-darwin-${{ matrix.goarch }}
-          otool -L dist/myapp-darwin-${{ matrix.goarch }}
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: myapp-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/*
-
-  # --- Universal Binary für macOS aus den beiden Architekturen bauen ---
-
-  macos-universal:
-    needs: build
-    runs-on: macos-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: myapp-darwin-*
-          path: artifacts
-          merge-multiple: true
-
-      - name: Create universal binary with lipo
-        run: |
-          mkdir -p dist
-          lipo -create \
-            artifacts/myapp-darwin-amd64 \
-            artifacts/myapp-darwin-arm64 \
-            -output dist/myapp-darwin-universal
-          chmod +x dist/myapp-darwin-universal
-          file dist/myapp-darwin-universal
-
-      - name: Upload universal artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: myapp-darwin-universal
-          path: dist/myapp-darwin-universal
-
-  release:
-    needs: [build, macos-universal]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
-
-      - name: Package release archives
-        run: |
-          cd artifacts
-          for f in myapp-*; do
-            chmod +x "$f"
-            tar czf "${f}.tar.gz" "$f"
-          done
-          sha256sum *.tar.gz > checksums.txt
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            artifacts/*.tar.gz
-            artifacts/checksums.txt
-          generate_release_notes: true
+...
