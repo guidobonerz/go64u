@@ -54,7 +54,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             autoconf automake build-essential cmake git libtool \
-            pkg-config nasm yasm
+            pkg-config nasm yasm libwayland-dev libxcb1-dev
 
       - name: Install build dependencies (macOS)
         if: matrix.goos == 'darwin' && steps.cache-ffmpeg.outputs.cache-hit != 'true'
@@ -80,8 +80,7 @@ jobs:
             --disable-programs \
             --disable-doc \
             --disable-debug \
-            --enable-pic \
-            --disable-autodetect
+            --enable-pic
 
           make -j$(getconf _NPROCESSORS_ONLN)
           make install
