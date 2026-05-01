@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 env:
-  FFMPEG_VERSION: "7.1"  # Cache-Key – bei Änderung wird FFmpeg neu gebaut
+  FFMPEG_VERSION: "6.1"  # Cache-Key – bei Änderung wird FFmpeg neu gebaut
 
 jobs:
   build:
@@ -46,7 +46,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/ffmpeg-install
-          key: ffmpeg-${{ env.FFMPEG_VERSION }}-${{ matrix.os }}-${{ matrix.goarch }}-v1
+          key: ffmpeg-${{ env.FFMPEG_VERSION }}-${{ matrix.os }}-${{ matrix.goarch }}-v2
 
       - name: Install build dependencies (Linux)
         if: matrix.goos == 'linux' && steps.cache-ffmpeg.outputs.cache-hit != 'true'
@@ -95,9 +95,6 @@ jobs:
           PKG_CONFIG_PATH: ${{ github.workspace }}/ffmpeg-install/lib/pkgconfig
         run: |
           mkdir -p dist
-          # -static linkt auch glibc statisch – setzt voraus, dass nichts
-          # libc-Funktionen erfordert die das verbieten (z.B. NSS/DNS).
-          # Alternativ: -static-libgcc nur für die libgcc, glibc dynamisch.
           go build \
             -ldflags="-s -w -linkmode external -extldflags '-static'" \
             -o dist/myapp-linux-amd64
@@ -109,9 +106,6 @@ jobs:
           PKG_CONFIG_PATH: ${{ github.workspace }}/ffmpeg-install/lib/pkgconfig
         run: |
           mkdir -p dist
-          # macOS erlaubt KEIN voll statisches Linken (libSystem muss dynamisch
-          # bleiben). FFmpeg ist statisch, System-Frameworks dynamisch – das ist
-          # die offiziell unterstützte Form.
           go build \
             -ldflags="-s -w" \
             -o dist/myapp-darwin-${{ matrix.goarch }}
@@ -128,7 +122,6 @@ jobs:
         if: matrix.goos == 'darwin'
         run: |
           file dist/myapp-darwin-${{ matrix.goarch }}
-          # FFmpeg-Symbole sollten KEINE dylib-Referenzen sein:
           otool -L dist/myapp-darwin-${{ matrix.goarch }}
 
       - name: Upload artifact
