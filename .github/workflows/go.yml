@@ -1,0 +1,126 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:  # erlaubt manuelles Auslösen über die GitHub-UI
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-13       # Intel-Runner
+            goos: darwin
+            goarch: amd64
+          - os: macos-14       # Apple Silicon Runner
+            goos: darwin
+            goarch: arm64
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      # --- FFmpeg-Libraries pro Plattform installieren ---
+
+      - name: Install FFmpeg (macOS)
+        if: matrix.goos == 'darwin'
+        run: |
+          brew install ffmpeg pkg-config
+          # Für statisches Linken brauchst du die .a-Dateien.
+          # Homebrew liefert standardmäßig nur dynamische .dylib.
+          # Optionen: (a) ffmpeg aus Source bauen mit --enable-static
+          # oder (b) static-ffmpeg-Tap nutzen:
+          brew tap homebrew-ffmpeg/ffmpeg
+          brew install homebrew-ffmpeg/ffmpeg/ffmpeg --with-static
+
+      - name: Install FFmpeg (Linux)
+        if: matrix.goos == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libavcodec-dev libavformat-dev libavutil-dev \
+            libswscale-dev libswresample-dev libavfilter-dev \
+            libavdevice-dev pkg-config
+
+      - name: Install FFmpeg (Windows)
+        if: matrix.goos == 'windows'
+        shell: pwsh
+        run: |
+          # vcpkg oder MSYS2 sind die üblichen Wege.
+          # Beispiel mit MSYS2:
+          choco install msys2 -y
+          # Dann FFmpeg-Devel-Pakete via pacman installieren
+          # Details abhängig vom konkreten Setup
+
+      # --- Build ---
+
+      - name: Build
+        env:
+          CGO_ENABLED: 1
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        shell: bash
+        run: |
+          mkdir -p dist
+          BINARY=myapp-${{ matrix.goos }}-${{ matrix.goarch }}
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            BINARY="${BINARY}.exe"
+          fi
+          go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" \
+            -o "dist/${BINARY}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: myapp-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+
+  # --- Release-Job: sammelt alle Artefakte und hängt sie an den Release ---
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create tarballs
+        run: |
+          cd artifacts
+          for f in myapp-*; do
+            if [[ "$f" == *.exe ]]; then
+              zip "${f%.exe}.zip" "$f"
+            else
+              chmod +x "$f"
+              tar czf "${f}.tar.gz" "$f"
+            fi
+          done
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.zip
+          generate_release_notes: true
