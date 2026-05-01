@@ -3,12 +3,12 @@ module drazil.de/go64u
 go 1.25.5
 
 require (
-	drazil.de/cmm v0.0.0
 	gioui.org v0.9.0
 	github.com/asticode/go-astiav v0.40.0
 	github.com/dustin/go-humanize v1.0.1
 	github.com/ebitengine/oto/v3 v3.4.0
 	github.com/fogleman/gg v1.3.0
+	github.com/guidobonerz/cmm v0.1.0
 	github.com/jlaffaye/ftp v0.2.0
 	github.com/mattn/go-sixel v0.0.8
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
@@ -35,5 +35,3 @@ require (
 	golang.org/x/text v0.32.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 )
-
-replace drazil.de/cmm => ../cmm

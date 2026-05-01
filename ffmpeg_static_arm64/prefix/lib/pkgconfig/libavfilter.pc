@@ -1,0 +1,14 @@
+prefix=/work/ffmpeg_static_arm64/prefix
+exec_prefix=${prefix}
+libdir=/work/ffmpeg_static_arm64/prefix/lib
+includedir=/work/ffmpeg_static_arm64/prefix/include
+
+Name: libavfilter
+Description: FFmpeg audio/video filtering library
+Version: 11.17.100
+Requires: libswscale >= 9.7.100, libavformat >= 62.13.102, libavcodec >= 62.30.100, libswresample >= 6.4.100, libavutil >= 60.30.100
+Requires.private: 
+Conflicts:
+Libs: -L${libdir}  -lavfilter -framework OpenGL -framework OpenGL -pthread -lm -lz -framework VideoToolbox -framework CoreImage -framework AppKit -framework CoreFoundation -framework CoreMedia -framework CoreVideo -framework CoreServices
+Libs.private: 
+Cflags: -I${includedir}

@@ -7,8 +7,8 @@ import (
 	"regexp"
 	"strings"
 
-	"drazil.de/cmm/cbm"
-	"drazil.de/cmm/media"
+	"github.com/guidobonerz/cmm/cbm"
+	"github.com/guidobonerz/cmm/media"
 	"drazil.de/go64u/config"
 	"drazil.de/go64u/network"
 	"drazil.de/go64u/util"
