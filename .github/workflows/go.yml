@@ -4,10 +4,13 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:  # erlaubt manuelles Auslösen über die GitHub-UI
+  workflow_dispatch:
 
 permissions:
   contents: write
+
+env:
+  FFMPEG_VERSION: "7.1"  # Cache-Key – bei Änderung wird FFmpeg neu gebaut
 
 jobs:
   build:
@@ -15,17 +18,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-13       # Intel-Runner
+          - os: macos-13
             goos: darwin
             goarch: amd64
-          - os: macos-14       # Apple Silicon Runner
+          - os: macos-14
             goos: darwin
             goarch: arm64
           - os: ubuntu-latest
             goos: linux
-            goarch: amd64
-          - os: windows-latest
-            goos: windows
             goarch: amd64
 
     runs-on: ${{ matrix.os }}
@@ -39,54 +39,97 @@ jobs:
         with:
           go-version: stable
 
-      # --- FFmpeg-Libraries pro Plattform installieren ---
+      # --- FFmpeg static build mit Caching ---
 
-      - name: Install FFmpeg (macOS)
-        if: matrix.goos == 'darwin'
-        run: |
-          brew install ffmpeg pkg-config
-          # Für statisches Linken brauchst du die .a-Dateien.
-          # Homebrew liefert standardmäßig nur dynamische .dylib.
-          # Optionen: (a) ffmpeg aus Source bauen mit --enable-static
-          # oder (b) static-ffmpeg-Tap nutzen:
-          brew tap homebrew-ffmpeg/ffmpeg
-          brew install homebrew-ffmpeg/ffmpeg/ffmpeg --with-static
+      - name: Cache FFmpeg build
+        id: cache-ffmpeg
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/ffmpeg-install
+          key: ffmpeg-${{ env.FFMPEG_VERSION }}-${{ matrix.os }}-${{ matrix.goarch }}-v1
 
-      - name: Install FFmpeg (Linux)
-        if: matrix.goos == 'linux'
+      - name: Install build dependencies (Linux)
+        if: matrix.goos == 'linux' && steps.cache-ffmpeg.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libavcodec-dev libavformat-dev libavutil-dev \
-            libswscale-dev libswresample-dev libavfilter-dev \
-            libavdevice-dev pkg-config
+            autoconf automake build-essential cmake git libtool \
+            pkg-config nasm yasm
 
-      - name: Install FFmpeg (Windows)
-        if: matrix.goos == 'windows'
-        shell: pwsh
+      - name: Install build dependencies (macOS)
+        if: matrix.goos == 'darwin' && steps.cache-ffmpeg.outputs.cache-hit != 'true'
         run: |
-          # vcpkg oder MSYS2 sind die üblichen Wege.
-          # Beispiel mit MSYS2:
-          choco install msys2 -y
-          # Dann FFmpeg-Devel-Pakete via pacman installieren
-          # Details abhängig vom konkreten Setup
+          brew install nasm yasm pkg-config automake
 
-      # --- Build ---
+      - name: Build FFmpeg from source
+        if: steps.cache-ffmpeg.outputs.cache-hit != 'true'
+        run: |
+          set -euxo pipefail
+          INSTALL_DIR="${{ github.workspace }}/ffmpeg-install"
+          mkdir -p "$INSTALL_DIR"
 
-      - name: Build
+          curl -L "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" \
+            | tar xJ
+          cd "ffmpeg-${FFMPEG_VERSION}"
+
+          ./configure \
+            --prefix="$INSTALL_DIR" \
+            --pkg-config-flags="--static" \
+            --enable-static \
+            --disable-shared \
+            --disable-programs \
+            --disable-doc \
+            --disable-debug \
+            --enable-pic \
+            --disable-autodetect
+
+          make -j$(getconf _NPROCESSORS_ONLN)
+          make install
+
+      # --- Go build mit statisch gelinktem FFmpeg ---
+
+      - name: Build Go binary (Linux)
+        if: matrix.goos == 'linux'
         env:
           CGO_ENABLED: 1
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-        shell: bash
+          PKG_CONFIG_PATH: ${{ github.workspace }}/ffmpeg-install/lib/pkgconfig
         run: |
           mkdir -p dist
-          BINARY=myapp-${{ matrix.goos }}-${{ matrix.goarch }}
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            BINARY="${BINARY}.exe"
-          fi
-          go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" \
-            -o "dist/${BINARY}"
+          # -static linkt auch glibc statisch – setzt voraus, dass nichts
+          # libc-Funktionen erfordert die das verbieten (z.B. NSS/DNS).
+          # Alternativ: -static-libgcc nur für die libgcc, glibc dynamisch.
+          go build \
+            -ldflags="-s -w -linkmode external -extldflags '-static'" \
+            -o dist/myapp-linux-amd64
+
+      - name: Build Go binary (macOS)
+        if: matrix.goos == 'darwin'
+        env:
+          CGO_ENABLED: 1
+          PKG_CONFIG_PATH: ${{ github.workspace }}/ffmpeg-install/lib/pkgconfig
+        run: |
+          mkdir -p dist
+          # macOS erlaubt KEIN voll statisches Linken (libSystem muss dynamisch
+          # bleiben). FFmpeg ist statisch, System-Frameworks dynamisch – das ist
+          # die offiziell unterstützte Form.
+          go build \
+            -ldflags="-s -w" \
+            -o dist/myapp-darwin-${{ matrix.goarch }}
+
+      # --- Verifikation ---
+
+      - name: Verify static linking (Linux)
+        if: matrix.goos == 'linux'
+        run: |
+          file dist/myapp-linux-amd64
+          ldd dist/myapp-linux-amd64 || echo "fully static (no dynamic deps)"
+
+      - name: Verify FFmpeg is statically linked (macOS)
+        if: matrix.goos == 'darwin'
+        run: |
+          file dist/myapp-darwin-${{ matrix.goarch }}
+          # FFmpeg-Symbole sollten KEINE dylib-Referenzen sein:
+          otool -L dist/myapp-darwin-${{ matrix.goarch }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -94,10 +137,36 @@ jobs:
           name: myapp-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/*
 
-  # --- Release-Job: sammelt alle Artefakte und hängt sie an den Release ---
+  # --- Universal Binary für macOS aus den beiden Architekturen bauen ---
+
+  macos-universal:
+    needs: build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: myapp-darwin-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create universal binary with lipo
+        run: |
+          mkdir -p dist
+          lipo -create \
+            artifacts/myapp-darwin-amd64 \
+            artifacts/myapp-darwin-arm64 \
+            -output dist/myapp-darwin-universal
+          chmod +x dist/myapp-darwin-universal
+          file dist/myapp-darwin-universal
+
+      - name: Upload universal artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: myapp-darwin-universal
+          path: dist/myapp-darwin-universal
 
   release:
-    needs: build
+    needs: [build, macos-universal]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -105,22 +174,19 @@ jobs:
           path: artifacts
           merge-multiple: true
 
-      - name: Create tarballs
+      - name: Package release archives
         run: |
           cd artifacts
           for f in myapp-*; do
-            if [[ "$f" == *.exe ]]; then
-              zip "${f%.exe}.zip" "$f"
-            else
-              chmod +x "$f"
-              tar czf "${f}.tar.gz" "$f"
-            fi
+            chmod +x "$f"
+            tar czf "${f}.tar.gz" "$f"
           done
+          sha256sum *.tar.gz > checksums.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             artifacts/*.tar.gz
-            artifacts/*.zip
+            artifacts/checksums.txt
           generate_release_notes: true
