@@ -1,6 +1,4 @@
-# Go workflow configuration
-
-name: Go
+name: Go CI
 
 on:
   push:
@@ -13,22 +11,35 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
-
       - name: Set up Go
         uses: actions/setup-go@v2
         with:
-          go-version: '1.x'
+          go-version: '1.16'
+      - name: Install dependencies
+        run: |
+          go mod tidy
+      - name: Build
+        run: |
+          go build ./...
 
       - name: Cache Go modules
         uses: actions/cache@v2
         with:
-          path: /go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.mod') }}
+          path: /tmp/.go-build
+          key: v3-${{ runner.os }}-go-${{ hashFiles('**/*.go') }}
+          restore-keys: |
+            v3-${{ runner.os }}-go-
+            v2-${{ runner.os }}-go-
 
-      # Update the cache key to v3
-      - name: Build
-        run: go build ./...
+      - name: Run tests
+        run: |
+          go test ./...
 
-      # Updated ./configure command with additional flags
-      - name: Configure
-        run: ./configure --enable-filter=buffersink --enable-filter=format
+      - name: Configure FFmpeg
+        run: |
+          ./configure \
+            --enable-filter=buffersink \
+            --enable-filter=format
+          make
+          make install
+          make clean
