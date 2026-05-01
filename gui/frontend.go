@@ -55,6 +55,7 @@ type guiApp struct {
 	keyboard        *VirtualKeyboard
 	keyboardVisible bool
 	keyboardBtn     widget.Clickable
+	lastWindowW     unit.Dp  // last width passed to a.window.Option, to skip redundant resizes
 	lastWindowH     unit.Dp  // last height passed to a.window.Option, to skip redundant resizes
 	keyFocusTag     struct{} // unique per-app tag for the window-level physical-keyboard handler
 }
@@ -250,29 +251,117 @@ func newApp() *guiApp {
 		selectedIdx: selectedIdx,
 	}
 
-	// Build the virtual keyboard. The listener is a stub for now — wiring it
-	// to a U64 endpoint (e.g. POST /v1/machine/typetext) is a follow-up.
 	var kb *VirtualKeyboard
-	kb, err = NewVirtualKeyboard(func(ev KeyEvent) {
-		fmt.Printf("vkb: %s/%q -> code=%d state=0x%02x\n", ev.Key.Type, ev.Key.Text, ev.Code, kb.OptionState())
-		sendKeyboardSequence(0xff03, []byte{byte(ev.Code) & 0xff})
-	})
+	kb, err = NewVirtualKeyboard(nil)
 	if err != nil {
 		panic(err)
 	}
+	kb.AddListener(keyboardListener(kb))
 	a.keyboard = kb
 	a.keyboardVisible = true
 	return a
 }
 
 func sendKeyboardSequence(command uint16, sequence []byte) {
-	length := []byte{0x00, 0x00}
-	length[0] = byte(len(sequence) + 2)
 	payload := make([]byte, len(sequence)+4)
 	copy(payload[:], util.GetWordArray(command))
-	copy(payload[2:], length[:])
+	copy(payload[2:], util.GetWordArray(uint16(len(sequence))))
 	copy(payload[4:], sequence[:])
 	network.SendTcpData(payload, "10.100.200.230")
+}
+
+// sendKeystrokes wraps a 0xff03 keystroke frame and writes it as a single
+// TCP packet — the common case for KEY/FUNCTION/COLOR(state<32) events.
+func sendKeystrokes(codes []byte) {
+	sendKeyboardSequence(0xff03, codes)
+}
+
+// buildPoke returns a single 0xff06 memory-poke frame
+// (opcode + length=3 + 2-byte addr + 1-byte data = 7 bytes), without
+// writing it. Multiple frames can be concatenated and sent via writeFrames
+// to mirror the Java buildCommand+write pattern.
+func buildPoke(addr uint16, data byte) []byte {
+	frame := make([]byte, 7)
+	copy(frame[0:2], util.GetWordArray(0xff06))
+	copy(frame[2:4], util.GetWordArray(3))
+	copy(frame[4:6], util.GetWordArray(addr))
+	frame[6] = data
+	return frame
+}
+
+// writeFrames concatenates pre-built frames and ships them as one TCP write.
+func writeFrames(frames ...[]byte) {
+	total := 0
+	for _, f := range frames {
+		total += len(f)
+	}
+	buf := make([]byte, 0, total)
+	for _, f := range frames {
+		buf = append(buf, f...)
+	}
+	network.SendTcpData(buf, "10.100.200.230")
+}
+
+// keyboardListener returns the KeyEvent handler attached to the
+// VirtualKeyboard. Mirrors the Java sendKeyboardSequence(Key) logic:
+// KEY/FUNCTION events and "normal-mode" COLOR events become 0xff03
+// keystrokes (with named buttons RUN/LIST/DIR/LOAD * expanding to BASIC
+// commands and code==3 triggering the RUN/STOP poke pair); COLOR events
+// while FRAME or BC option is latched become $D020/$D021 pokes.
+func keyboardListener(kb *VirtualKeyboard) func(KeyEvent) {
+	return func(ev KeyEvent) {
+		k := ev.Key
+		state := kb.OptionState()
+		code := ev.Code
+		fmt.Printf("vkb: %s/%q -> code=%d state=0x%02x\n", k.Type, k.Text, code, state)
+
+		if k.Type == "KEY" || k.Type == "FUNCTION" ||
+			(k.Type == "COLOR" && state < optFrameColor) {
+
+			if code == 3 {
+				writeFrames(buildPoke(0x0314, 0x7b), buildPoke(0x0091, 127))
+				writeFrames(buildPoke(0x0314, 0x31), buildPoke(0x0091, 255))
+				return
+			}
+
+			var codes []byte
+			switch k.Name {
+			case "RUN":
+				codes = append([]byte("RUN"), 13)
+			case "LIST":
+				codes = append([]byte("LIST"), 13)
+			case "DIR":
+				codes = append([]byte(`LOAD"$",8`), 13)
+			case "LOAD":
+				codes = append([]byte(`LOAD"*",8,1`), 13)
+			case "AUTO":
+				codes = append(append(append(append([]byte{},
+					[]byte(`LOAD"*",8,1`)...), 13),
+					[]byte(`RUN`)...), 13)
+
+			default:
+				if code < 0 {
+					return
+				}
+				codes = []byte{byte(code & 0xff)}
+			}
+			sendKeystrokes(codes)
+			return
+		}
+
+		if k.Type == "COLOR" {
+			var frames [][]byte
+			if state&optFrameColor != 0 {
+				frames = append(frames, buildPoke(0xd020, byte(k.Index)))
+			}
+			if state&optBC != 0 {
+				frames = append(frames, buildPoke(0xd021, byte(k.Index)))
+			}
+			if len(frames) > 0 {
+				writeFrames(frames...)
+			}
+		}
+	}
 }
 
 func buildDeviceList() []deviceUI {
@@ -379,27 +468,31 @@ func (a *guiApp) run() {
 	}
 }
 
-// syncWindowHeight resizes the gioui window so its height tracks what's
-// actually rendered: the toolbar plus an optional monitor row plus an optional
-// keyboard plus the separator + footer. Called once per frame so flips of
-// videoActive / keyboardVisible take effect immediately.
+// syncWindowSize resizes the gioui window so its content fits exactly: the
+// height tracks toolbar + optional monitor + optional keyboard + footer; the
+// width grows just enough to host the device cards plus a right column wide
+// enough for the (always full-width) keyboard, so monitor and keyboard line
+// up vertically without horizontal clipping. Called once per frame so flips
+// of videoActive / keyboardVisible take effect immediately.
 //
-// Sizes are conservative estimates of the per-section heights at the default
-// 800dp window width; if the cards column ends up taller than the right
-// column, gioui will honor that and the window will simply contain a small
-// amount of slack — better than baking the cards count in here.
-func (a *guiApp) syncWindowHeight() {
+// Heights are conservative estimates of the per-section sizes; if the cards
+// column ends up taller than the right column, gioui will honor that and the
+// window will simply contain a small amount of slack.
+func (a *guiApp) syncWindowSize() {
 	const (
 		insetH      = unit.Dp(20) // top + bottom
+		insetW      = unit.Dp(20) // left + right (matches layoutRoot's UniformInset(10))
+		cardsW      = unit.Dp(280)
+		columnGapW  = unit.Dp(10)
 		toolbarH    = unit.Dp(80)
 		topSpacerH  = unit.Dp(10)
-		monitorH    = unit.Dp(347) // cellH for 1 monitor at 800dp width
 		kbSpacerH   = unit.Dp(10)
 		kbH         = unit.Dp(7 * 25) // 7 rows × 25dp cells
 		botSpacerH  = unit.Dp(6)
 		separatorH  = unit.Dp(1)
 		footSpacerH = unit.Dp(4)
 		footerH     = unit.Dp(20)
+		defaultW    = unit.Dp(800)
 	)
 
 	hasActiveVideo := false
@@ -410,26 +503,46 @@ func (a *guiApp) syncWindowHeight() {
 		}
 	}
 
+	// Compute the right column's natural width. We reserve enough room for
+	// the keyboard regardless of whether it is currently visible, so toggling
+	// the keyboard off does not shrink the monitor — the column width stays
+	// constant for the whole session.
+	rightW := defaultW - insetW - cardsW - columnGapW
+	if a.keyboard != nil {
+		if kbW := a.keyboard.MaxWidthDp(); kbW > rightW {
+			rightW = kbW
+		}
+	}
+	w := insetW + cardsW + columnGapW + rightW
+	if w < defaultW {
+		w = defaultW
+	}
+
+	// Monitor cell height is derived from the actual right-column width and
+	// the C64 aspect ratio, so the window grows tall enough for whatever
+	// width we settled on above.
 	h := insetH + toolbarH + topSpacerH + botSpacerH + separatorH + footSpacerH + footerH
 	if hasActiveVideo {
+		monitorH := unit.Dp(float32(rightW) * float32(imaging.HEIGHT) / float32(imaging.WIDTH))
 		h += monitorH
 	}
 	if a.keyboardVisible {
 		h += kbSpacerH + kbH
 	}
 
-	if h == a.lastWindowH {
+	if w == a.lastWindowW && h == a.lastWindowH {
 		return
 	}
+	a.lastWindowW = w
 	a.lastWindowH = h
-	a.window.Option(app.Size(unit.Dp(800), h))
+	a.window.Option(app.Size(w, h))
 }
 
 func (a *guiApp) layoutRoot(gtx layout.Context) layout.Dimensions {
 	// Resize the window to fit current content (monitor + optional keyboard)
 	// before painting the frame, so the bottom of the window always lines up
 	// just below the footer with no leftover empty space.
-	a.syncWindowHeight()
+	a.syncWindowSize()
 
 	// Physical-keyboard input: register our focus tag with the input router,
 	// drain any key events queued for it, and re-request focus so the tag
@@ -1096,6 +1209,13 @@ func (a *guiApp) layoutVideoMonitor(gtx layout.Context) layout.Dimensions {
 	}
 
 	totalW := gtx.Constraints.Max.X
+	// Floor the monitor width to the keyboard's natural width so a single
+	// monitor never renders narrower than the keyboard sitting beneath it.
+	if a.keyboard != nil && a.keyboardVisible {
+		if minW := a.keyboard.MaxWidth(gtx); totalW < minW {
+			totalW = minW
+		}
+	}
 	gap := gtx.Dp(unit.Dp(10))
 	totalGap := gap * (count - 1)
 	cellW := (totalW - totalGap) / count
