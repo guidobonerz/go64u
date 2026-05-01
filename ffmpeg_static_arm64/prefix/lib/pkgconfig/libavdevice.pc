@@ -1,0 +1,14 @@
+prefix=/work/ffmpeg_static_arm64/prefix
+exec_prefix=${prefix}
+libdir=/work/ffmpeg_static_arm64/prefix/lib
+includedir=/work/ffmpeg_static_arm64/prefix/include
+
+Name: libavdevice
+Description: FFmpeg device handling library
+Version: 62.4.100
+Requires: libavfilter >= 11.17.100, libswscale >= 9.7.100, libavformat >= 62.13.102, libavcodec >= 62.30.100, libswresample >= 6.4.100, libavutil >= 60.30.100
+Requires.private: 
+Conflicts:
+Libs: -L${libdir}  -lavdevice -framework Foundation -framework AudioToolbox -framework CoreAudio -lm -framework AVFoundation -framework CoreVideo -framework CoreMedia -framework CoreGraphics -framework AudioToolbox -pthread
+Libs.private: 
+Cflags: -I${includedir}

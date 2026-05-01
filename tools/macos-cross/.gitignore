@@ -1,0 +1,4 @@
+# Apple SDK tarballs are licensed material — never commit them.
+sdk/MacOSX*.sdk.tar.xz
+sdk/MacOSX*.sdk.tar.bz2
+sdk/MacOSX*.sdk
