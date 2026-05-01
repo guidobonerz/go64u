@@ -16,6 +16,8 @@ Devices:
 StreamingTargets:
   twitch: rtmp://live.twitch.tv/app/<stream_key>
   OTHER: rtmp://
+ResourceUrl: http://hackerswithstyle.se/leet/search
+DatabaseClient: Assembly64  
 DumpFolder: <path to dump folder>
 ScreenshotFolder: <path to screenshot folder>
 RecordingFolder: <path to recording folder>
@@ -25,6 +27,3 @@ Overlay:
   GameY: 100
   GameW: 1536
   GameH: 1088
-
-
-
