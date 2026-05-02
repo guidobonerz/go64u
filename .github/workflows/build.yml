@@ -14,6 +14,11 @@ env:
   # like AV_CODEC_ID_JPEGXL_ANIM that were only added in 8.x).
   FFMPEG_VERSION: 'n8.0'
   X264_REF: 'stable'
+  # Run JavaScript-based actions (checkout/setup-go/cache/upload-artifact)
+  # on Node.js 24. GitHub will force this default from June 2026; opting in
+  # now silences the deprecation warning and shakes out any incompatibility
+  # while we still have the fallback toggle.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
   build:
