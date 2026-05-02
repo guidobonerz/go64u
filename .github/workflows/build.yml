@@ -78,6 +78,7 @@ jobs:
             mingw-w64-x86_64-pkg-config
             mingw-w64-x86_64-nasm
             mingw-w64-x86_64-make
+            make
             git
             patch
             diffutils
@@ -166,6 +167,10 @@ jobs:
           cd ..
 
           # ---- FFmpeg ----
+          # Use MSYS2's plain `make` (bash-backed) here, not mingw32-make.
+          # FFmpeg's ffbuild/library.mak uses $(file >...) to write an ar
+          # response file; mingw32-make on Windows trips on that and fails
+          # with "ar: @libavfilter/libavfilter.a.objs: No such file".
           git clone --depth 1 --branch "$FFMPEG_VERSION" \
             https://github.com/FFmpeg/FFmpeg.git ffmpeg-src
           cd ffmpeg-src
@@ -183,8 +188,8 @@ jobs:
             --extra-cflags="-I$PREFIX/include" \
             --extra-ldflags="-L$PREFIX/lib" \
             --arch=x86_64 --target-os=mingw64
-          mingw32-make -j"$NUMBER_OF_PROCESSORS"
-          mingw32-make install
+          make -j"$NUMBER_OF_PROCESSORS"
+          make install
 
       # ----- Go build with static FFmpeg -----
 
