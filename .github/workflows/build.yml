@@ -23,7 +23,8 @@ env:
   # x264 has no real "stable" tag — its 'stable' branch moves. Pin to a
   # concrete commit so the cache key actually represents the built artifact.
   # Bump this manually when you want to pull in upstream x264 changes.
-  X264_REF: '31e19f92f00882fe3ea4cea25826c9a17b3aaae8'
+  # Current value = tip of x264 'stable' branch as of 2026-05-02.
+  X264_REF: 'b35605ace3ddf7c1a5d67a2eb553f034aef41d55'
   # Run JavaScript-based actions (checkout/setup-go/cache/upload-artifact)
   # on Node.js 24. GitHub will force this default from June 2026; opting in
   # now silences the deprecation warning and shakes out any incompatibility
