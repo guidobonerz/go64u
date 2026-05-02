@@ -15,20 +15,13 @@ concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
 
+# IMPORTANT: FFMPEG_VERSION and X264_REF MUST stay identical to the values in
+# .github/workflows/ffmpeg-prebuilt.yml. Mismatch means this workflow downloads
+# a tarball that doesn't match what the Go build expects (the PREBUILT_VERSION
+# sanity check below will catch it).
 env:
-  # Pin third-party deps so cache keys stay stable across runs.
-  # FFmpeg 8.0+ is required for go-astiav v0.40.0 (it references codec IDs
-  # like AV_CODEC_ID_JPEGXL_ANIM that were only added in 8.x).
   FFMPEG_VERSION: 'n8.0'
-  # x264 has no real "stable" tag — its 'stable' branch moves. Pin to a
-  # concrete commit so the cache key actually represents the built artifact.
-  # Bump this manually when you want to pull in upstream x264 changes.
-  # Current value = tip of x264 'stable' branch as of 2026-05-02.
   X264_REF: 'b35605ace3ddf7c1a5d67a2eb553f034aef41d55'
-  # Run JavaScript-based actions (checkout/setup-go/cache/upload-artifact)
-  # on Node.js 24. GitHub will force this default from June 2026; opting in
-  # now silences the deprecation warning and shakes out any incompatibility
-  # while we still have the fallback toggle.
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
@@ -90,16 +83,19 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      # ----- Per-OS host deps -----
-      # We still need these even when FFmpeg is static: nasm/yasm to build x264;
-      # X11/Wayland/EGL/Vulkan headers for Gio's CGO; mingw for Windows.
+      # ----- Per-OS host deps (only what the Go-build itself needs) -----
+      # FFmpeg/x264 toolchain (nasm, make, patch, ...) is no longer needed
+      # here — the prebuilt tarball ships ready-built .a archives. We do
+      # still need: a C compiler for CGO, pkg-config to read the .pc files
+      # from the tarball, zstd to extract it, and the Gio system libs on
+      # Linux for the Gio CGO portion.
 
       - name: Install host deps (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            gcc make pkg-config nasm yasm \
+            gcc pkg-config zstd \
             libx11-dev libx11-xcb-dev libxkbcommon-dev libxkbcommon-x11-dev \
             libxcursor-dev libxfixes-dev \
             libgles2-mesa-dev libegl1-mesa-dev \
@@ -110,7 +106,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew update
-          brew install pkg-config nasm
+          brew install pkg-config zstd
 
       - name: Install host deps (Windows / MSYS2)
         if: runner.os == 'Windows'
@@ -124,160 +120,85 @@ jobs:
           install: >-
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-pkg-config
-            mingw-w64-x86_64-nasm
-            mingw-w64-x86_64-make
-            make
+            mingw-w64-x86_64-zstd
+            tar
             git
-            patch
-            diffutils
 
-      # ----- Cache the FFmpeg+x264 static prefix -----
-      # Path is identical across runners so the cache action handles it uniformly.
-      # Windows path is workspace-relative; MSYS2 sees it via /d/a/... mapping.
-      # X264_REF is now pinned to a concrete commit, so the cache key is
-      # deterministic — wenn der Key passt, ist auch der Inhalt der richtige.
+      # ----- Pull the prebuilt FFmpeg+x264 static prefix from the
+      #       'ffmpeg-prebuilt' GitHub Release (built by ffmpeg-prebuilt.yml).
+      # If this step fails, the prebuilt release is missing or out of date —
+      # run `gh workflow run ffmpeg-prebuilt.yml --ref main` and retry.
 
-      - name: Cache static FFmpeg+x264
-        id: ffmpeg-cache
-        uses: actions/cache@v4
-        with:
-          path: ffmpeg-static/prefix
-          key: ffmpeg-static-${{ matrix.name }}-ffmpeg${{ env.FFMPEG_VERSION }}-x264${{ env.X264_REF }}-v3
-
-      # ----- Build x264 + FFmpeg statically (Unix) -----
-
-      - name: Build static x264 + FFmpeg (Linux/macOS)
-        if: runner.os != 'Windows' && steps.ffmpeg-cache.outputs.cache-hit != 'true'
+      - name: Download prebuilt FFmpeg static (Linux/macOS)
+        if: runner.os != 'Windows'
         env:
-          MATRIX_CLANG_ARCH: ${{ matrix.clang_arch }}
-          MATRIX_FF_ARCH: ${{ matrix.ff_arch }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ASSET: ffmpeg-static-${{ matrix.name }}.tar.zst
         run: |
           set -e
-          PREFIX="$PWD/ffmpeg-static/prefix"
-          mkdir -p "$PREFIX"
-
-          # On macOS we may cross-compile (e.g. amd64 binary on an arm64
-          # runner). Detect cross by comparing the matrix-requested clang
-          # arch against `uname -m`. CROSS_CFLAGS/CROSS_LDFLAGS get fed to
-          # both x264 and FFmpeg; on Linux they stay empty.
-          CROSS_CFLAGS=""
-          CROSS_LDFLAGS=""
-          X264_HOST=""
-          FFMPEG_CROSS=""
-          if [ "$(uname)" = "Darwin" ]; then
-            NATIVE_ARCH="$(uname -m)"
-            CROSS_CFLAGS="-arch ${MATRIX_CLANG_ARCH}"
-            CROSS_LDFLAGS="-arch ${MATRIX_CLANG_ARCH}"
-            if [ "$MATRIX_CLANG_ARCH" != "$NATIVE_ARCH" ]; then
-              X264_HOST="--host=${MATRIX_CLANG_ARCH}-apple-darwin"
-              FFMPEG_CROSS="--enable-cross-compile"
-            fi
+          if ! gh release download ffmpeg-prebuilt \
+                --repo "${{ github.repository }}" \
+                --pattern "$ASSET" --output "$ASSET"; then
+            echo "::error::Prebuilt asset '$ASSET' not found in 'ffmpeg-prebuilt' release."
+            echo "::error::Run: gh workflow run ffmpeg-prebuilt.yml --ref main"
+            exit 1
+          fi
+          mkdir -p ffmpeg-static
+          tar --use-compress-program=zstd -xf "$ASSET" -C ffmpeg-static
+          rm "$ASSET"
+          test -f ffmpeg-static/prefix/lib/libavcodec.a || {
+            echo "::error::extracted tarball did not yield prefix/lib/libavcodec.a"
+            exit 1
+          }
+          # Sanity-check the version pin matches what we expect.
+          if [ -f ffmpeg-static/prefix/PREBUILT_VERSION ]; then
+            cat ffmpeg-static/prefix/PREBUILT_VERSION
+            grep -q "^FFMPEG_VERSION=${FFMPEG_VERSION}$" ffmpeg-static/prefix/PREBUILT_VERSION || {
+              echo "::error::Prebuilt was built with a different FFMPEG_VERSION than this workflow expects."
+              echo "::error::Re-run ffmpeg-prebuilt.yml after aligning both workflows."
+              exit 1
+            }
+            grep -q "^X264_REF=${X264_REF}$" ffmpeg-static/prefix/PREBUILT_VERSION || {
+              echo "::error::Prebuilt was built with a different X264_REF than this workflow expects."
+              exit 1
+            }
           fi
 
-          # ---- x264 ----
-          # Wir checken erst den default-Branch aus und resetten dann auf den
-          # gepinnten Commit. `--depth 1 --branch <sha>` funktioniert mit
-          # vielen Git-Servern nicht, daher dieser Umweg.
-          git clone https://code.videolan.org/videolan/x264.git x264-src
-          cd x264-src
-          git checkout "$X264_REF"
-          ./configure --prefix="$PREFIX" \
-            --enable-static --disable-cli --disable-opencl \
-            $X264_HOST \
-            ${CROSS_CFLAGS:+--extra-cflags="$CROSS_CFLAGS"} \
-            ${CROSS_LDFLAGS:+--extra-ldflags="$CROSS_LDFLAGS"}
-          if [ "$(uname)" = "Darwin" ]; then JOBS=$(sysctl -n hw.ncpu); else JOBS=$(nproc); fi
-          make -j"$JOBS"
-          make install
-          cd ..
-
-          # ---- FFmpeg ----
-          git clone --depth 1 --branch "$FFMPEG_VERSION" \
-            https://github.com/FFmpeg/FFmpeg.git ffmpeg-src
-          cd ffmpeg-src
-
-          EXTRA_CONFIG=""
-          ENCODERS="libx264,aac"
-          ARCH_FLAGS=""
-          if [ "$(uname)" = "Darwin" ]; then
-            EXTRA_CONFIG="--enable-videotoolbox $FFMPEG_CROSS --arch=${MATRIX_FF_ARCH} --target-os=darwin"
-            ENCODERS="libx264,h264_videotoolbox,aac"
-            ARCH_FLAGS="-arch ${MATRIX_CLANG_ARCH}"
-          fi
-
-          # Disable X11/XCB autodetect: macos-latest has Homebrew libx11/xcb,
-          # which FFmpeg would silently pull into libavdevice (xcbgrab.c). The
-          # resulting binary carries a hard runtime ref to libX11.6.dylib and
-          # crashes on any Mac without XQuartz. Linux is X11-native so the
-          # dynamic ref works there, but we don't need FFmpeg's grabbers
-          # anyway — we feed video frames in directly.
-          PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig" ./configure \
-            --prefix="$PREFIX" \
-            --enable-gpl --enable-libx264 $EXTRA_CONFIG \
-            --enable-static --disable-shared \
-            --disable-programs --disable-doc \
-            --disable-xlib --disable-libxcb \
-            --disable-libxcb-shm --disable-libxcb-xfixes --disable-libxcb-shape \
-            --enable-protocol=file,pipe,tcp,rtmp \
-            --enable-encoder=$ENCODERS \
-            --enable-decoder=rawvideo,pcm_s16le \
-            --enable-muxer=flv,mp4,matroska \
-            --enable-demuxer=rawvideo \
-            --enable-swscale --enable-swresample \
-            --extra-cflags="-I$PREFIX/include $ARCH_FLAGS" \
-            --extra-ldflags="-L$PREFIX/lib $ARCH_FLAGS"
-          make -j"$JOBS"
-          make install
-
-      # ----- Build x264 + FFmpeg statically (Windows / MSYS2) -----
-
-      - name: Build static x264 + FFmpeg (Windows / MSYS2)
-        if: runner.os == 'Windows' && steps.ffmpeg-cache.outputs.cache-hit != 'true'
+      - name: Download prebuilt FFmpeg static (Windows / MSYS2)
+        if: runner.os == 'Windows'
         shell: msys2 {0}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ASSET: ffmpeg-static-${{ matrix.name }}.tar.zst
         run: |
           set -e
           export PATH="/mingw64/bin:$PATH"
-          mkdir -p ffmpeg-static/prefix
-          # Mixed-style path (D:/a/...) so both MSYS2 'install' and native
-          # MinGW tools (gcc-ranlib etc.) can resolve it. Without this,
-          # install lands the file but gcc-ranlib can't find it.
-          PREFIX="$(cygpath -m "$(pwd)/ffmpeg-static/prefix")"
-
-          # ---- x264 ----
-          # Same pinned-commit checkout strategy as on Unix.
-          git clone https://code.videolan.org/videolan/x264.git x264-src
-          cd x264-src
-          git checkout "$X264_REF"
-          ./configure --prefix="$PREFIX" \
-            --enable-static --disable-cli --disable-opencl
-          mingw32-make -j"$NUMBER_OF_PROCESSORS"
-          mingw32-make install
-          cd ..
-
-          # ---- FFmpeg ----
-          # Use MSYS2's plain `make` (bash-backed) here, not mingw32-make.
-          # FFmpeg's ffbuild/library.mak uses $(file >...) to write an ar
-          # response file; mingw32-make on Windows trips on that and fails
-          # with "ar: @libavfilter/libavfilter.a.objs: No such file".
-          git clone --depth 1 --branch "$FFMPEG_VERSION" \
-            https://github.com/FFmpeg/FFmpeg.git ffmpeg-src
-          cd ffmpeg-src
-          PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig" ./configure \
-            --prefix="$PREFIX" \
-            --enable-gpl --enable-libx264 \
-            --enable-static --disable-shared \
-            --disable-programs --disable-doc \
-            --enable-protocol=file,pipe,tcp,rtmp \
-            --enable-encoder=libx264,aac \
-            --enable-decoder=rawvideo,pcm_s16le \
-            --enable-muxer=flv,mp4,matroska \
-            --enable-demuxer=rawvideo \
-            --enable-swscale --enable-swresample \
-            --extra-cflags="-I$PREFIX/include" \
-            --extra-ldflags="-L$PREFIX/lib" \
-            --arch=x86_64 --target-os=mingw64
-          make -j"$NUMBER_OF_PROCESSORS"
-          make install
+          # gh.exe is on the runner's Windows PATH (path-type: inherit).
+          if ! gh release download ffmpeg-prebuilt \
+                --repo "${{ github.repository }}" \
+                --pattern "$ASSET" --output "$ASSET"; then
+            echo "::error::Prebuilt asset '$ASSET' not found in 'ffmpeg-prebuilt' release."
+            echo "::error::Run: gh workflow run ffmpeg-prebuilt.yml --ref main"
+            exit 1
+          fi
+          mkdir -p ffmpeg-static
+          tar --use-compress-program=zstd -xf "$ASSET" -C ffmpeg-static
+          rm "$ASSET"
+          test -f ffmpeg-static/prefix/lib/libavcodec.a || {
+            echo "::error::extracted tarball did not yield prefix/lib/libavcodec.a"
+            exit 1
+          }
+          if [ -f ffmpeg-static/prefix/PREBUILT_VERSION ]; then
+            cat ffmpeg-static/prefix/PREBUILT_VERSION
+            grep -q "^FFMPEG_VERSION=${FFMPEG_VERSION}$" ffmpeg-static/prefix/PREBUILT_VERSION || {
+              echo "::error::Prebuilt was built with a different FFMPEG_VERSION than this workflow expects."
+              exit 1
+            }
+            grep -q "^X264_REF=${X264_REF}$" ffmpeg-static/prefix/PREBUILT_VERSION || {
+              echo "::error::Prebuilt was built with a different X264_REF than this workflow expects."
+              exit 1
+            }
+          fi
 
       # ----- Go build with static FFmpeg -----
 
