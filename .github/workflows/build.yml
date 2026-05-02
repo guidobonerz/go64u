@@ -135,7 +135,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ASSET: ffmpeg-static-${{ matrix.name }}.tar.zst
         run: |
-          set -e
+          set -e -o pipefail
           if ! gh release download ffmpeg-prebuilt \
                 --repo "${{ github.repository }}" \
                 --pattern "$ASSET" --output "$ASSET"; then
@@ -144,7 +144,10 @@ jobs:
             exit 1
           fi
           mkdir -p ffmpeg-static
-          tar --use-compress-program=zstd -xf "$ASSET" -C ffmpeg-static
+          # Pipe-based extract: macOS bsdtar's --use-compress-program=zstd is
+          # broken on read (zstd reports "Broken pipe", tar reports child
+          # status 70). Decompress with zstd then pipe into tar -f - .
+          zstd -d --stdout "$ASSET" | tar -xf - -C ffmpeg-static
           rm "$ASSET"
           test -f ffmpeg-static/prefix/lib/libavcodec.a || {
             echo "::error::extracted tarball did not yield prefix/lib/libavcodec.a"
@@ -171,7 +174,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ASSET: ffmpeg-static-${{ matrix.name }}.tar.zst
         run: |
-          set -e
+          set -e -o pipefail
           export PATH="/mingw64/bin:$PATH"
           # gh.exe is on the runner's Windows PATH (path-type: inherit).
           if ! gh release download ffmpeg-prebuilt \
@@ -182,7 +185,9 @@ jobs:
             exit 1
           fi
           mkdir -p ffmpeg-static
-          tar --use-compress-program=zstd -xf "$ASSET" -C ffmpeg-static
+          # Pipe-based extract for symmetry with the Unix path; avoids any
+          # bsdtar/GNU-tar inconsistencies around --use-compress-program.
+          zstd -d --stdout "$ASSET" | tar -xf - -C ffmpeg-static
           rm "$ASSET"
           test -f ffmpeg-static/prefix/lib/libavcodec.a || {
             echo "::error::extracted tarball did not yield prefix/lib/libavcodec.a"
