@@ -55,10 +55,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             gcc make pkg-config nasm yasm \
-            libx11-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libx11-dev libx11-xcb-dev libxkbcommon-dev libxkbcommon-x11-dev \
             libxcursor-dev libxfixes-dev \
             libgles2-mesa-dev libegl1-mesa-dev \
-            libwayland-dev libvulkan-dev
+            libwayland-dev libvulkan-dev \
+            libasound2-dev
 
       - name: Install host deps (macOS)
         if: runner.os == 'macOS'
