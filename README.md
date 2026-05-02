@@ -318,7 +318,8 @@ On Windows, files can be dragged and dropped onto a device monitor window. The f
 
 ## Installation
 
-Create an environment variable **GO64U_CONFIG_PATH** where the **.go64u.yaml** file is located.
+The app tries to find the config file first in the app folder. If this is the wrong location,
+create an environment variable **GO64U_CONFIG_PATH** where the **.go64u.yaml** file is located.
 
 The structure of the file is currently as follows:
 
