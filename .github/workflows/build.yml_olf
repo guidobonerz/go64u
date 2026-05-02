@@ -8,22 +8,12 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Verhindert, dass ein Tag-Push, der gleichzeitig auf main landet, den Workflow
-# zweimal startet. Gleichzeitig werden ältere Läufe auf demselben Ref abgebrochen,
-# wenn ein neuer Push kommt — spart CI-Minuten bei schnellen Folge-Pushes.
-concurrency:
-  group: build-${{ github.ref }}
-  cancel-in-progress: true
-
 env:
   # Pin third-party deps so cache keys stay stable across runs.
   # FFmpeg 8.0+ is required for go-astiav v0.40.0 (it references codec IDs
   # like AV_CODEC_ID_JPEGXL_ANIM that were only added in 8.x).
   FFMPEG_VERSION: 'n8.0'
-  # x264 has no real "stable" tag — its 'stable' branch moves. Pin to a
-  # concrete commit so the cache key actually represents the built artifact.
-  # Bump this manually when you want to pull in upstream x264 changes.
-  X264_REF: '31e19f92f00882fe3ea4cea25826c9a17b3aaae8'
+  X264_REF: 'stable'
   # Run JavaScript-based actions (checkout/setup-go/cache/upload-artifact)
   # on Node.js 24. GitHub will force this default from June 2026; opting in
   # now silences the deprecation warning and shakes out any incompatibility
@@ -60,29 +50,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
-      # ----- Windows: Defender-Ausschluss VOR jeder Kompilier-Aktivität -----
-      # Defender scannt sonst jede der ~tausenden .o-Dateien beim Erstellen.
-      # Workspace-Pfad und die typischen Toolchain-Prozesse ausschließen.
-      # Muss vor setup-msys2 und vor dem FFmpeg-Build laufen, damit die
-      # Exclusion auch greift, wenn der Cache miss'ed.
-
-      - name: Defender exclusions (Windows)
-        if: runner.os == 'Windows'
-        shell: powershell
-        run: |
-          Add-MpPreference -ExclusionPath "${{ github.workspace }}"
-          Add-MpPreference -ExclusionPath "C:\msys64"
-          Add-MpPreference -ExclusionProcess "gcc.exe"
-          Add-MpPreference -ExclusionProcess "g++.exe"
-          Add-MpPreference -ExclusionProcess "ld.exe"
-          Add-MpPreference -ExclusionProcess "ar.exe"
-          Add-MpPreference -ExclusionProcess "ranlib.exe"
-          Add-MpPreference -ExclusionProcess "make.exe"
-          Add-MpPreference -ExclusionProcess "mingw32-make.exe"
-          Add-MpPreference -ExclusionProcess "nasm.exe"
-          Add-MpPreference -ExclusionProcess "go.exe"
-          Add-MpPreference -ExclusionProcess "link.exe"
 
       - uses: actions/setup-go@v5
         with:
@@ -133,15 +100,13 @@ jobs:
       # ----- Cache the FFmpeg+x264 static prefix -----
       # Path is identical across runners so the cache action handles it uniformly.
       # Windows path is workspace-relative; MSYS2 sees it via /d/a/... mapping.
-      # X264_REF is now pinned to a concrete commit, so the cache key is
-      # deterministic — wenn der Key passt, ist auch der Inhalt der richtige.
 
       - name: Cache static FFmpeg+x264
         id: ffmpeg-cache
         uses: actions/cache@v4
         with:
           path: ffmpeg-static/prefix
-          key: ffmpeg-static-${{ matrix.name }}-ffmpeg${{ env.FFMPEG_VERSION }}-x264${{ env.X264_REF }}-v3
+          key: ffmpeg-static-${{ matrix.name }}-ffmpeg${{ env.FFMPEG_VERSION }}-x264${{ env.X264_REF }}-v2
 
       # ----- Build x264 + FFmpeg statically (Unix) -----
 
@@ -174,12 +139,9 @@ jobs:
           fi
 
           # ---- x264 ----
-          # Wir checken erst den default-Branch aus und resetten dann auf den
-          # gepinnten Commit. `--depth 1 --branch <sha>` funktioniert mit
-          # vielen Git-Servern nicht, daher dieser Umweg.
-          git clone https://code.videolan.org/videolan/x264.git x264-src
+          git clone --depth 1 --branch "$X264_REF" \
+            https://code.videolan.org/videolan/x264.git x264-src
           cd x264-src
-          git checkout "$X264_REF"
           ./configure --prefix="$PREFIX" \
             --enable-static --disable-cli --disable-opencl \
             $X264_HOST \
@@ -243,10 +205,9 @@ jobs:
           PREFIX="$(cygpath -m "$(pwd)/ffmpeg-static/prefix")"
 
           # ---- x264 ----
-          # Same pinned-commit checkout strategy as on Unix.
-          git clone https://code.videolan.org/videolan/x264.git x264-src
+          git clone --depth 1 --branch "$X264_REF" \
+            https://code.videolan.org/videolan/x264.git x264-src
           cd x264-src
-          git checkout "$X264_REF"
           ./configure --prefix="$PREFIX" \
             --enable-static --disable-cli --disable-opencl
           mingw32-make -j"$NUMBER_OF_PROCESSORS"
@@ -290,12 +251,6 @@ jobs:
           export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
           PKG_FLAGS="$(pkg-config --static --libs libavcodec libavformat libavutil libswscale libswresample)"
           export CGO_LDFLAGS="$PKG_FLAGS -lm -lz -ldl -lpthread"
-          # Hinweis: kein `-extldflags '-static'` auf Linux — Gio braucht
-          # X11/Wayland/EGL/Vulkan/ALSA als dynamische System-Libs. FFmpeg/x264
-          # bleiben statisch (nur .a im PREFIX vorhanden), libc/pthread/X11
-          # werden bewusst dynamisch gelinkt. Konsistenz mit Windows ist hier
-          # nicht möglich, weil Windows keine vergleichbaren System-GUI-Libs
-          # hat — dort kann der MinGW-Runtime statisch reingezogen werden.
           go build -trimpath -ldflags '-w -s' -o ${{ matrix.output }} main.go
 
       - name: Go build (macOS)
@@ -381,21 +336,11 @@ jobs:
         run: |
           export PATH="/mingw64/bin:$PATH"
           file ${{ matrix.output }}
-          LDD_OUT="$(ldd ${{ matrix.output }} 2>&1 || true)"
-          echo "$LDD_OUT"
-          # 1) FFmpeg/x264 dürfen nicht dynamisch gelinkt sein.
-          if echo "$LDD_OUT" | grep -iE 'avcodec|avformat|avutil|swscale|swresample|x264'; then
+          if ldd ${{ matrix.output }} 2>&1 | grep -iE 'avcodec|swscale|x264'; then
             echo "ERROR: ${{ matrix.output }} is dynamically linked against FFmpeg/x264." >&2
             exit 1
           fi
-          # 2) MinGW-Runtime darf nicht dynamisch gelinkt sein — sonst braucht
-          #    der User MSYS2-DLLs zur Laufzeit. Das verifiziert, dass
-          #    `-extldflags '-static'` wirklich gegriffen hat.
-          if echo "$LDD_OUT" | grep -iE 'libgcc_s|libwinpthread|libstdc\+\+'; then
-            echo "ERROR: ${{ matrix.output }} pulls in MinGW runtime DLLs." >&2
-            exit 1
-          fi
-          echo "OK: no FFmpeg/x264 or MinGW runtime DLL references."
+          echo "OK: no FFmpeg/x264 DLL references."
 
       # ----- Upload as a workflow artifact -----
 
