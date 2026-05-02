@@ -342,8 +342,12 @@ jobs:
           # Windows system libs FFmpeg pulls in transitively.
           export CGO_LDFLAGS="$PKG_FLAGS -lws2_32 -lbcrypt -lole32 -lsecur32 -lstrmiids -luuid"
           # -extldflags '-static' here gives a fully static .exe (no MSYS2 DLL
-          # dependency at runtime); -H=windowsgui suppresses the console window.
-          go build -trimpath -ldflags "-H=windowsgui -w -s -extldflags '-static'" \
+          # dependency at runtime). NB: deliberately NOT '-H=windowsgui' —
+          # that would make the binary a GUI subsystem app with no stdout,
+          # breaking CLI modes like 'go64u --terminal' and cobra subcommands.
+          # Trade-off: a brief console window flashes when double-clicked
+          # in Explorer; that's acceptable for a hybrid GUI/CLI tool.
+          go build -trimpath -ldflags "-w -s -extldflags '-static'" \
             -o ${{ matrix.output }} main.go
 
       # ----- macOS: ad-hoc codesign so the binary launches on Apple Silicon -----
