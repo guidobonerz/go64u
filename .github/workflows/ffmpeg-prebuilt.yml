@@ -8,17 +8,16 @@ name: ffmpeg-prebuilt
 # IMPORTANT: FFMPEG_VERSION and X264_REF MUST stay identical to the values in
 # .github/workflows/build.yml. When bumping a version:
 #   1. Edit BOTH files
-#   2. Run this workflow (auto-triggered by the push, or via
-#      `gh workflow run ffmpeg-prebuilt.yml --ref main`)
+#   2. Manually trigger this workflow:
+#        gh workflow run ffmpeg-prebuilt.yml --ref main
 #   3. Wait for the 'ffmpeg-prebuilt' release to update
-#   4. Then proceed with build.yml runs
+#   4. Then proceed with build.yml runs (tag-push or otherwise)
+#
+# Manual-only on purpose: rebuilding FFmpeg costs ~25 min per platform; we don't
+# want it firing as a side effect of an unrelated commit on main.
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/ffmpeg-prebuilt.yml'
 
 concurrency:
   group: ffmpeg-prebuilt
