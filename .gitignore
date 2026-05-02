@@ -21,13 +21,13 @@ __debug.*
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
-
+ffmpeg_static*/
 dist/
 .claude/
 .claude/**
 .vscode/
 .vscode/**
 .tools/**
-
+go64u*
 
 
