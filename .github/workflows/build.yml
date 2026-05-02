@@ -106,7 +106,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ffmpeg-static/prefix
-          key: ffmpeg-static-${{ matrix.name }}-ffmpeg${{ env.FFMPEG_VERSION }}-x264${{ env.X264_REF }}-v1
+          key: ffmpeg-static-${{ matrix.name }}-ffmpeg${{ env.FFMPEG_VERSION }}-x264${{ env.X264_REF }}-v2
 
       # ----- Build x264 + FFmpeg statically (Unix) -----
 
@@ -166,11 +166,19 @@ jobs:
             ARCH_FLAGS="-arch ${MATRIX_CLANG_ARCH}"
           fi
 
+          # Disable X11/XCB autodetect: macos-latest has Homebrew libx11/xcb,
+          # which FFmpeg would silently pull into libavdevice (xcbgrab.c). The
+          # resulting binary carries a hard runtime ref to libX11.6.dylib and
+          # crashes on any Mac without XQuartz. Linux is X11-native so the
+          # dynamic ref works there, but we don't need FFmpeg's grabbers
+          # anyway — we feed video frames in directly.
           PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig" ./configure \
             --prefix="$PREFIX" \
             --enable-gpl --enable-libx264 $EXTRA_CONFIG \
             --enable-static --disable-shared \
             --disable-programs --disable-doc \
+            --disable-xlib --disable-libxcb \
+            --disable-libxcb-shm --disable-libxcb-xfixes --disable-libxcb-shape \
             --enable-protocol=file,pipe,tcp,rtmp \
             --enable-encoder=$ENCODERS \
             --enable-decoder=rawvideo,pcm_s16le \
@@ -308,11 +316,19 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           file ${{ matrix.output }}
+          otool -L ${{ matrix.output }}
           if otool -L ${{ matrix.output }} | grep -E 'libav|libsw|libx264'; then
             echo "ERROR: ${{ matrix.output }} is dynamically linked against FFmpeg/x264." >&2
             exit 1
           fi
-          echo "OK: no FFmpeg/x264 dylib references."
+          # Catch any Homebrew dylib leaking into the binary (e.g. libX11.6
+          # via FFmpeg autodetecting brew's libx11). End users won't have
+          # /opt/homebrew/, the binary would refuse to launch.
+          if otool -L ${{ matrix.output }} | grep -E '/opt/homebrew/|/usr/local/'; then
+            echo "ERROR: ${{ matrix.output }} references a Homebrew dylib path that won't exist on most user machines." >&2
+            exit 1
+          fi
+          echo "OK: no FFmpeg/x264 or Homebrew dylib references."
 
       - name: Verify static linkage (Windows)
         if: runner.os == 'Windows'
