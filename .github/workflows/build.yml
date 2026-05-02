@@ -146,8 +146,11 @@ jobs:
         run: |
           set -e
           export PATH="/mingw64/bin:$PATH"
-          PREFIX="$(pwd)/ffmpeg-static/prefix"
-          mkdir -p "$PREFIX"
+          mkdir -p ffmpeg-static/prefix
+          # Mixed-style path (D:/a/...) so both MSYS2 'install' and native
+          # MinGW tools (gcc-ranlib etc.) can resolve it. Without this,
+          # install lands the file but gcc-ranlib can't find it.
+          PREFIX="$(cygpath -m "$(pwd)/ffmpeg-static/prefix")"
 
           # ---- x264 ----
           git clone --depth 1 --branch "$X264_REF" \
@@ -218,7 +221,10 @@ jobs:
         run: |
           set -e
           export PATH="/mingw64/bin:$PATH"
-          PREFIX="$(pwd)/ffmpeg-static/prefix"
+          # Match the mixed-style prefix used during the FFmpeg build so the
+          # .pc files and CGO_LDFLAGS paths resolve through both MSYS2 and
+          # native MinGW tools.
+          PREFIX="$(cygpath -m "$(pwd)/ffmpeg-static/prefix")"
           export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
           PKG_FLAGS="$(pkg-config --static --libs libavcodec libavformat libavutil libswscale libswresample)"
           # Windows system libs FFmpeg pulls in transitively.
