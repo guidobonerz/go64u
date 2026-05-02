@@ -10,8 +10,15 @@ on:
 
 env:
   # Pin third-party deps so cache keys stay stable across runs.
-  FFMPEG_VERSION: 'n7.1.1'
+  # FFmpeg 8.0+ is required for go-astiav v0.40.0 (it references codec IDs
+  # like AV_CODEC_ID_JPEGXL_ANIM that were only added in 8.x).
+  FFMPEG_VERSION: 'n8.0'
   X264_REF: 'stable'
+  # Run JavaScript-based actions (checkout/setup-go/cache/upload-artifact)
+  # on Node.js 24. GitHub will force this default from June 2026; opting in
+  # now silences the deprecation warning and shakes out any incompatibility
+  # while we still have the fallback toggle.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
   build:
@@ -27,11 +34,17 @@ jobs:
             runs-on: ubuntu-latest
             output: go64u-linux-amd64
           - name: macos-arm64
-            runs-on: macos-latest      # Apple Silicon
+            runs-on: macos-latest      # Apple Silicon, native build
             output: go64u-darwin-arm64
+            goarch: arm64
+            clang_arch: arm64
+            ff_arch: aarch64
           - name: macos-amd64
-            runs-on: macos-13          # last Intel runner
+            runs-on: macos-latest      # Apple Silicon, cross-compile to x86_64
             output: go64u-darwin-amd64
+            goarch: amd64
+            clang_arch: x86_64
+            ff_arch: x86_64
 
     runs-on: ${{ matrix.runs-on }}
 
@@ -53,10 +66,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             gcc make pkg-config nasm yasm \
-            libx11-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libx11-dev libx11-xcb-dev libxkbcommon-dev libxkbcommon-x11-dev \
             libxcursor-dev libxfixes-dev \
             libgles2-mesa-dev libegl1-mesa-dev \
-            libwayland-dev libvulkan-dev
+            libwayland-dev libvulkan-dev \
+            libasound2-dev
 
       - name: Install host deps (macOS)
         if: runner.os == 'macOS'
@@ -70,11 +84,15 @@ jobs:
         with:
           msystem: MINGW64
           update: true
+          # Inherit the Windows PATH so setup-go's go.exe is reachable from
+          # within the msys2 shell. Default 'minimal' would hide it.
+          path-type: inherit
           install: >-
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-pkg-config
             mingw-w64-x86_64-nasm
             mingw-w64-x86_64-make
+            make
             git
             patch
             diffutils
@@ -94,17 +112,41 @@ jobs:
 
       - name: Build static x264 + FFmpeg (Linux/macOS)
         if: runner.os != 'Windows' && steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        env:
+          MATRIX_CLANG_ARCH: ${{ matrix.clang_arch }}
+          MATRIX_FF_ARCH: ${{ matrix.ff_arch }}
         run: |
           set -e
           PREFIX="$PWD/ffmpeg-static/prefix"
           mkdir -p "$PREFIX"
+
+          # On macOS we may cross-compile (e.g. amd64 binary on an arm64
+          # runner). Detect cross by comparing the matrix-requested clang
+          # arch against `uname -m`. CROSS_CFLAGS/CROSS_LDFLAGS get fed to
+          # both x264 and FFmpeg; on Linux they stay empty.
+          CROSS_CFLAGS=""
+          CROSS_LDFLAGS=""
+          X264_HOST=""
+          FFMPEG_CROSS=""
+          if [ "$(uname)" = "Darwin" ]; then
+            NATIVE_ARCH="$(uname -m)"
+            CROSS_CFLAGS="-arch ${MATRIX_CLANG_ARCH}"
+            CROSS_LDFLAGS="-arch ${MATRIX_CLANG_ARCH}"
+            if [ "$MATRIX_CLANG_ARCH" != "$NATIVE_ARCH" ]; then
+              X264_HOST="--host=${MATRIX_CLANG_ARCH}-apple-darwin"
+              FFMPEG_CROSS="--enable-cross-compile"
+            fi
+          fi
 
           # ---- x264 ----
           git clone --depth 1 --branch "$X264_REF" \
             https://code.videolan.org/videolan/x264.git x264-src
           cd x264-src
           ./configure --prefix="$PREFIX" \
-            --enable-static --disable-cli --disable-opencl
+            --enable-static --disable-cli --disable-opencl \
+            $X264_HOST \
+            ${CROSS_CFLAGS:+--extra-cflags="$CROSS_CFLAGS"} \
+            ${CROSS_LDFLAGS:+--extra-ldflags="$CROSS_LDFLAGS"}
           if [ "$(uname)" = "Darwin" ]; then JOBS=$(sysctl -n hw.ncpu); else JOBS=$(nproc); fi
           make -j"$JOBS"
           make install
@@ -117,9 +159,11 @@ jobs:
 
           EXTRA_CONFIG=""
           ENCODERS="libx264,aac"
+          ARCH_FLAGS=""
           if [ "$(uname)" = "Darwin" ]; then
-            EXTRA_CONFIG="--enable-videotoolbox"
+            EXTRA_CONFIG="--enable-videotoolbox $FFMPEG_CROSS --arch=${MATRIX_FF_ARCH} --target-os=darwin"
             ENCODERS="libx264,h264_videotoolbox,aac"
+            ARCH_FLAGS="-arch ${MATRIX_CLANG_ARCH}"
           fi
 
           PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig" ./configure \
@@ -133,8 +177,8 @@ jobs:
             --enable-muxer=flv,mp4,matroska \
             --enable-demuxer=rawvideo \
             --enable-swscale --enable-swresample \
-            --extra-cflags="-I$PREFIX/include" \
-            --extra-ldflags="-L$PREFIX/lib"
+            --extra-cflags="-I$PREFIX/include $ARCH_FLAGS" \
+            --extra-ldflags="-L$PREFIX/lib $ARCH_FLAGS"
           make -j"$JOBS"
           make install
 
@@ -163,6 +207,10 @@ jobs:
           cd ..
 
           # ---- FFmpeg ----
+          # Use MSYS2's plain `make` (bash-backed) here, not mingw32-make.
+          # FFmpeg's ffbuild/library.mak uses $(file >...) to write an ar
+          # response file; mingw32-make on Windows trips on that and fails
+          # with "ar: @libavfilter/libavfilter.a.objs: No such file".
           git clone --depth 1 --branch "$FFMPEG_VERSION" \
             https://github.com/FFmpeg/FFmpeg.git ffmpeg-src
           cd ffmpeg-src
@@ -180,8 +228,8 @@ jobs:
             --extra-cflags="-I$PREFIX/include" \
             --extra-ldflags="-L$PREFIX/lib" \
             --arch=x86_64 --target-os=mingw64
-          mingw32-make -j"$NUMBER_OF_PROCESSORS"
-          mingw32-make install
+          make -j"$NUMBER_OF_PROCESSORS"
+          make install
 
       # ----- Go build with static FFmpeg -----
 
@@ -201,6 +249,9 @@ jobs:
         if: runner.os == 'macOS'
         env:
           CGO_ENABLED: '1'
+          GOOS: darwin
+          GOARCH: ${{ matrix.goarch }}
+          MATRIX_CLANG_ARCH: ${{ matrix.clang_arch }}
         run: |
           set -e
           PREFIX="$PWD/ffmpeg-static/prefix"
@@ -209,7 +260,8 @@ jobs:
           FRAMEWORKS="-framework VideoToolbox -framework CoreMedia -framework CoreVideo \
                       -framework CoreFoundation -framework AudioToolbox -framework Security \
                       -framework AVFoundation -framework CoreServices"
-          export CGO_LDFLAGS="$PKG_FLAGS $FRAMEWORKS"
+          export CGO_CFLAGS="-arch ${MATRIX_CLANG_ARCH}"
+          export CGO_LDFLAGS="$PKG_FLAGS $FRAMEWORKS -arch ${MATRIX_CLANG_ARCH}"
           # No -extldflags -static on macOS; libSystem must remain dynamic.
           go build -trimpath -ldflags '-w -s' -o ${{ matrix.output }} main.go
 
