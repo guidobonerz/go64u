@@ -474,7 +474,7 @@
       "id" : 0,
       "type" : "FUNCTION",
       "name" : "LOAD",
-      "size" : 4,
+      "size" : 3,
       "text" : "LOAD"
     } ]
   }, {
