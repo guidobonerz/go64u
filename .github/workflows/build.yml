@@ -104,8 +104,7 @@ jobs:
             libxcursor-dev libxfixes-dev \
             libgles2-mesa-dev libegl1-mesa-dev \
             libwayland-dev libvulkan-dev \
-            libasound2-dev \
-            upx-ucl
+            libasound2-dev
 
       - name: Install host deps (macOS)
         if: runner.os == 'macOS'
@@ -131,11 +130,6 @@ jobs:
             git
             patch
             diffutils
-
-      - name: Install UPX (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: choco install -y upx
 
       # ----- Cache the FFmpeg+x264 static prefix -----
       # Path is identical across runners so the cache action handles it uniformly.
@@ -407,29 +401,6 @@ jobs:
             exit 1
           fi
           echo "OK: no FFmpeg/x264 or MinGW runtime DLL references."
-
-      # ----- Compress with UPX (Linux + Windows only) -----
-      # macOS/Mach-O: skipped. UPX 4.x has only partial Mach-O support and
-      # always corrupts the codesign signature, leaving the binary unable
-      # to launch under Gatekeeper on Apple Silicon (Killed: 9).
-
-      - name: Compress with UPX (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          BEFORE=$(stat -c%s ${{ matrix.output }})
-          upx --best ${{ matrix.output }}
-          AFTER=$(stat -c%s ${{ matrix.output }})
-          printf 'UPX: %d -> %d bytes (%.0f%%)\n' "$BEFORE" "$AFTER" \
-            "$(echo "$AFTER * 100 / $BEFORE" | bc)"
-
-      - name: Compress with UPX (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $before = (Get-Item '${{ matrix.output }}').Length
-          upx --best '${{ matrix.output }}'
-          $after = (Get-Item '${{ matrix.output }}').Length
-          Write-Host ("UPX: {0} -> {1} bytes ({2:N0}%)" -f $before, $after, ($after * 100 / $before))
 
       # ----- Upload as a workflow artifact -----
 
