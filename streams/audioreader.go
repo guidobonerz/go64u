@@ -47,7 +47,12 @@ func (ar *AudioReader) Read() {
 	// Local playback mode: play through oto
 	pr, pw := io.Pipe()
 	player := ar.AudioContext.NewPlayer(pr)
-	player.SetBufferSize(770 * 4)
+	// 100 ms @ 48 kHz stereo S16: 48000 * 2 * 2 / 10 = 19200 bytes. The
+	// previous 770*4 (~16 ms) was tight enough to cause underruns on Linux
+	// PipeWire/ALSA — anything below ~50 ms there crackles. Windows WASAPI
+	// and macOS CoreAudio handle it fine, but the larger buffer is harmless
+	// on those (just ~80 ms extra latency, imperceptible for a stream).
+	player.SetBufferSize(19200)
 	done := make(chan struct{})
 	go func() {
 		defer pw.Close()
@@ -79,7 +84,10 @@ func (ar *AudioReader) Read() {
 					log.Println("Pipe write error:", err)
 					return
 				}
-			case <-time.After(100 * time.Millisecond):
+			case <-time.After(500 * time.Millisecond):
+				// With a 100 ms player buffer, a write can legitimately block
+				// for a few hundred ms during normal back-pressure. Only flag
+				// this as truly stalled after 500 ms.
 				log.Println("Write timeout - player may be stalled")
 				if !player.IsPlaying() {
 					log.Println("player stopped. Restart")
