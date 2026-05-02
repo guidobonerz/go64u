@@ -10,7 +10,9 @@ on:
 
 env:
   # Pin third-party deps so cache keys stay stable across runs.
-  FFMPEG_VERSION: 'n7.1.1'
+  # FFmpeg 8.0+ is required for go-astiav v0.40.0 (it references codec IDs
+  # like AV_CODEC_ID_JPEGXL_ANIM that were only added in 8.x).
+  FFMPEG_VERSION: 'n8.0'
   X264_REF: 'stable'
 
 jobs:
