@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"runtime"
 	"sort"
 	"sync"
 	"time"
@@ -58,6 +59,13 @@ type guiApp struct {
 	lastWindowW     unit.Dp  // last width passed to a.window.Option, to skip redundant resizes
 	lastWindowH     unit.Dp  // last height passed to a.window.Option, to skip redundant resizes
 	keyFocusTag     struct{} // unique per-app tag for the window-level physical-keyboard handler
+
+	// linuxFixedSize is true on Linux. gioui v0.9.0 cannot resize a Wayland
+	// window after creation (xdg_toplevel size requests are dropped) and
+	// many tiling X11 WMs ignore client-initiated resizes too, so we lock
+	// the window to its worst-case dimensions at startup and skip the
+	// per-frame syncWindowSize calls.
+	linuxFixedSize bool
 }
 
 // dropHit maps a monitor cell's on-screen rectangle (in Windows client-area
@@ -227,11 +235,30 @@ func newApp() *guiApp {
 		devices[i].overlayOn = hasOverlay
 	}
 
-	w := new(app.Window)
+	// Build the virtual keyboard first so its MaxWidthDp can feed the
+	// initial window size — important on Linux where the window cannot be
+	// resized after creation (see guiApp.linuxFixedSize).
+	kb, err := NewVirtualKeyboard(nil)
+	if err != nil {
+		panic(err)
+	}
+	kb.AddListener(keyboardListener(kb))
 
-	// Initial size matches the keyboard-visible default in layoutTopToolbar:
-	// toolbar + monitor + keyboard + footer with no extra space below.
-	w.Option(app.Title("go64u - monitor"), app.Size(unit.Dp(800), unit.Dp(680)))
+	// Worst-case dimensions: video stream on AND keyboard visible. On Linux
+	// we pin Min/MaxSize to this so the compositor allocates the window at
+	// the right size on first map; on other platforms syncWindowSize will
+	// resize per frame.
+	maxW, maxH := computeTargetSize(kb, true, true)
+
+	w := new(app.Window)
+	opts := []app.Option{
+		app.Title("go64u - monitor"),
+		app.Size(maxW, maxH),
+	}
+	if runtime.GOOS == "linux" {
+		opts = append(opts, app.MinSize(maxW, maxH), app.MaxSize(maxW, maxH))
+	}
+	w.Option(opts...)
 
 	// Start with the config's selected device highlighted (or first device)
 	selectedIdx := 0
@@ -244,21 +271,15 @@ func newApp() *guiApp {
 	}
 
 	a := &guiApp{
-		window:      w,
-		theme:       th,
-		otoCtx:      otoCtx,
-		devices:     devices,
-		selectedIdx: selectedIdx,
+		window:          w,
+		theme:           th,
+		otoCtx:          otoCtx,
+		devices:         devices,
+		selectedIdx:     selectedIdx,
+		keyboard:        kb,
+		keyboardVisible: true,
+		linuxFixedSize:  runtime.GOOS == "linux",
 	}
-
-	var kb *VirtualKeyboard
-	kb, err = NewVirtualKeyboard(nil)
-	if err != nil {
-		panic(err)
-	}
-	kb.AddListener(keyboardListener(kb))
-	a.keyboard = kb
-	a.keyboardVisible = true
 	return a
 }
 
@@ -468,17 +489,17 @@ func (a *guiApp) run() {
 	}
 }
 
-// syncWindowSize resizes the gioui window so its content fits exactly: the
-// height tracks toolbar + optional monitor + optional keyboard + footer; the
-// width grows just enough to host the device cards plus a right column wide
-// enough for the (always full-width) keyboard, so monitor and keyboard line
-// up vertically without horizontal clipping. Called once per frame so flips
-// of videoActive / keyboardVisible take effect immediately.
+// computeTargetSize returns the window dimensions for the given content
+// state: toolbar + optional monitor + optional keyboard + footer for the
+// height, cards column plus a right column sized to fit the full keyboard
+// for the width.
 //
-// Heights are conservative estimates of the per-section sizes; if the cards
-// column ends up taller than the right column, gioui will honor that and the
-// window will simply contain a small amount of slack.
-func (a *guiApp) syncWindowSize() {
+// kb may be nil during early startup; in that case a default right-column
+// width is used. Heights are conservative estimates of the per-section
+// sizes; if the cards column ends up taller than the right column gioui
+// will honor that and the window will simply contain a small amount of
+// slack.
+func computeTargetSize(kb *VirtualKeyboard, hasActiveVideo, keyboardVisible bool) (w, h unit.Dp) {
 	const (
 		insetH      = unit.Dp(20) // top + bottom
 		insetW      = unit.Dp(20) // left + right (matches layoutRoot's UniformInset(10))
@@ -495,25 +516,16 @@ func (a *guiApp) syncWindowSize() {
 		defaultW    = unit.Dp(800)
 	)
 
-	hasActiveVideo := false
-	for i := range a.devices {
-		if a.devices[i].videoActive {
-			hasActiveVideo = true
-			break
-		}
-	}
-
-	// Compute the right column's natural width. We reserve enough room for
-	// the keyboard regardless of whether it is currently visible, so toggling
-	// the keyboard off does not shrink the monitor — the column width stays
-	// constant for the whole session.
+	// Reserve enough room for the keyboard regardless of whether it is
+	// currently visible, so toggling the keyboard off does not shrink the
+	// monitor — the column width stays constant for the whole session.
 	rightW := defaultW - insetW - cardsW - columnGapW
-	if a.keyboard != nil {
-		if kbW := a.keyboard.MaxWidthDp(); kbW > rightW {
+	if kb != nil {
+		if kbW := kb.MaxWidthDp(); kbW > rightW {
 			rightW = kbW
 		}
 	}
-	w := insetW + cardsW + columnGapW + rightW
+	w = insetW + cardsW + columnGapW + rightW
 	if w < defaultW {
 		w = defaultW
 	}
@@ -521,15 +533,33 @@ func (a *guiApp) syncWindowSize() {
 	// Monitor cell height is derived from the actual right-column width and
 	// the C64 aspect ratio, so the window grows tall enough for whatever
 	// width we settled on above.
-	h := insetH + toolbarH + topSpacerH + botSpacerH + separatorH + footSpacerH + footerH
+	h = insetH + toolbarH + topSpacerH + botSpacerH + separatorH + footSpacerH + footerH
 	if hasActiveVideo {
 		monitorH := unit.Dp(float32(rightW) * float32(imaging.HEIGHT) / float32(imaging.WIDTH))
 		h += monitorH
 	}
-	if a.keyboardVisible {
+	if keyboardVisible {
 		h += kbSpacerH + kbH
 	}
+	return w, h
+}
 
+// syncWindowSize resizes the gioui window so its content fits exactly.
+// Called once per frame so flips of videoActive / keyboardVisible take
+// effect immediately. No-op on Linux, where the window was pinned to its
+// worst-case size at construction (see linuxFixedSize).
+func (a *guiApp) syncWindowSize() {
+	if a.linuxFixedSize {
+		return
+	}
+	hasActiveVideo := false
+	for i := range a.devices {
+		if a.devices[i].videoActive {
+			hasActiveVideo = true
+			break
+		}
+	}
+	w, h := computeTargetSize(a.keyboard, hasActiveVideo, a.keyboardVisible)
 	if w == a.lastWindowW && h == a.lastWindowH {
 		return
 	}
