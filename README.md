@@ -312,7 +312,12 @@ On Windows, files can be dragged and dropped onto a device monitor window. The f
 ![Audio Stream Player](https://github.com/guidobonerz/go64u/blob/main/doc/streamplayer.png)
 
 ### Stream Player - Monitor
+#### Single Stream
 ![Stream Player Monitor](https://github.com/guidobonerz/go64u/blob/main/doc/gui_streamplayer.png)
+#### Multiple Stream
+![Stream Player Monitor](https://github.com/guidobonerz/go64u/blob/main/doc/split.png)
+#### Virtual keyboard
+![Stream Player Monitor](https://github.com/guidobonerz/go64u/blob/main/doc/keyboard.png)
 
 ---
 
