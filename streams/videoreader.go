@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"sync"
-	"time"
 
 	"drazil.de/go64u/config"
 	"drazil.de/go64u/imaging"
@@ -31,7 +30,7 @@ func (vr *VideoReader) Read() {
 	capture := false
 	imageData := make([]byte, imaging.SIZE/2)
 
-	frameChan := make(chan []byte, 8) // Buffer frames to absorb UDP timing jitter
+	frameChan := make(chan []byte, 8)
 
 	go func() {
 		defer close(frameChan)
@@ -67,7 +66,6 @@ func (vr *VideoReader) Read() {
 				count++
 			}
 
-			// Bit 15 = last packet of the frame. Emit completed frame, then start new one.
 			if linenumber&0x8000 == 0x8000 {
 				if capture && count == 68 {
 					frameCopy := framePool.Get().([]byte)
@@ -107,47 +105,32 @@ func (vr *VideoReader) Read() {
 		return
 	}
 
-	fps := vr.Renderer.GetFPS()
-	ticker := time.NewTicker(time.Second / time.Duration(fps))
-	defer ticker.Stop()
-
-	frameNumber := 0
-	tickCount := 0
 	for {
-		tickCount++
-		<-ticker.C
-		var latestFrame []byte
-		gotFrame := false
-		drainCount := 0
+		frame, ok := <-frameChan
+		if !ok {
+			fmt.Println("Frame channel closed, stopping")
+			return
+		}
 
 	drainLoop:
 		for {
 			select {
-			case frame, ok := <-frameChan:
-				if !ok {
-					fmt.Println("Frame channel closed, stopping")
-					return
+			case newer, newerOk := <-frameChan:
+				if !newerOk {
+					break drainLoop
 				}
-				// Return previously drained frame to pool
-				if latestFrame != nil {
-					framePool.Put(latestFrame[:cap(latestFrame)])
-				}
-				latestFrame = frame
-				gotFrame = true
-				drainCount++
+				framePool.Put(frame[:cap(frame)])
+				frame = newer
 			default:
 				break drainLoop
 			}
 		}
-		if gotFrame {
-			if !vr.Renderer.Render(latestFrame) {
-				framePool.Put(latestFrame[:cap(latestFrame)])
-				fmt.Println("Render failed, stopping stream")
-				return
-			}
-			framePool.Put(latestFrame[:cap(latestFrame)])
-			latestFrame = nil
-			frameNumber++
+
+		rendered := vr.Renderer.Render(frame)
+		framePool.Put(frame[:cap(frame)])
+		if !rendered {
+			fmt.Println("Render failed, stopping stream")
+			return
 		}
 	}
 }
