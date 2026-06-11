@@ -20,7 +20,11 @@ func IsDeviceOnline(device *config.Device, timeout time.Duration) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	url := fmt.Sprintf("http://%s/v1/version", device.IpAddress)
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if config.GetConfig().Password != "" {
+		req.Header.Set("X-password", config.GetConfig().Password)
+	}
 	if err != nil {
 		return false
 	}

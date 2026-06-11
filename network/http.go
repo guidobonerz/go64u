@@ -36,6 +36,9 @@ func SendHttpRequest(httpConfig *HttpConfig) []byte {
 		request.Header.Set("Client-Id", config.GetConfig().DatabaseClient)
 		request.Header.Set("User-Agent", "Assembly Query")
 	}
+	if config.GetConfig().Password != "" {
+		request.Header.Set("X-Password", config.GetConfig().Password)
+	}
 
 	resp, err := client.Do(request)
 	if err != nil {

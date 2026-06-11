@@ -9,7 +9,7 @@ import (
 	"math"
 	"net/http"
 	"os"
-	"sort"
+	"runtime"
 	"sync"
 	"time"
 
@@ -58,6 +58,13 @@ type guiApp struct {
 	lastWindowW     unit.Dp  // last width passed to a.window.Option, to skip redundant resizes
 	lastWindowH     unit.Dp  // last height passed to a.window.Option, to skip redundant resizes
 	keyFocusTag     struct{} // unique per-app tag for the window-level physical-keyboard handler
+
+	// linuxFixedSize is true on Linux. gioui v0.9.0 cannot resize a Wayland
+	// window after creation (xdg_toplevel size requests are dropped) and
+	// many tiling X11 WMs ignore client-initiated resizes too, so we lock
+	// the window to its worst-case dimensions at startup and skip the
+	// per-frame syncWindowSize calls.
+	linuxFixedSize bool
 }
 
 // dropHit maps a monitor cell's on-screen rectangle (in Windows client-area
@@ -219,7 +226,7 @@ func newApp() *guiApp {
 	th.Palette.Fg = colorText
 	th.Palette.Bg = colorBackground
 
-	devices := buildDeviceList()
+	devices := BuildDeviceList()
 	hasOverlay := config.GetConfig().Overlay.ImagePath != ""
 	for i := range devices {
 		devices[i].audioMonitor = true
@@ -227,11 +234,30 @@ func newApp() *guiApp {
 		devices[i].overlayOn = hasOverlay
 	}
 
-	w := new(app.Window)
+	// Build the virtual keyboard first so its MaxWidthDp can feed the
+	// initial window size — important on Linux where the window cannot be
+	// resized after creation (see guiApp.linuxFixedSize).
+	kb, err := NewVirtualKeyboard(nil)
+	if err != nil {
+		panic(err)
+	}
+	kb.AddListener(KeyboardListener(kb))
 
-	// Initial size matches the keyboard-visible default in layoutTopToolbar:
-	// toolbar + monitor + keyboard + footer with no extra space below.
-	w.Option(app.Title("go64u - monitor"), app.Size(unit.Dp(800), unit.Dp(680)))
+	// Worst-case dimensions: video stream on AND keyboard visible. On Linux
+	// we pin Min/MaxSize to this so the compositor allocates the window at
+	// the right size on first map; on other platforms syncWindowSize will
+	// resize per frame.
+	maxW, maxH := computeTargetSize(kb, true, true)
+
+	w := new(app.Window)
+	opts := []app.Option{
+		app.Title("go64u - monitor"),
+		app.Size(maxW, maxH),
+	}
+	if runtime.GOOS == "linux" {
+		opts = append(opts, app.MinSize(maxW, maxH), app.MaxSize(maxW, maxH))
+	}
+	w.Option(opts...)
 
 	// Start with the config's selected device highlighted (or first device)
 	selectedIdx := 0
@@ -244,144 +270,16 @@ func newApp() *guiApp {
 	}
 
 	a := &guiApp{
-		window:      w,
-		theme:       th,
-		otoCtx:      otoCtx,
-		devices:     devices,
-		selectedIdx: selectedIdx,
+		window:          w,
+		theme:           th,
+		otoCtx:          otoCtx,
+		devices:         devices,
+		selectedIdx:     selectedIdx,
+		keyboard:        kb,
+		keyboardVisible: true,
+		linuxFixedSize:  runtime.GOOS == "linux",
 	}
-
-	var kb *VirtualKeyboard
-	kb, err = NewVirtualKeyboard(nil)
-	if err != nil {
-		panic(err)
-	}
-	kb.AddListener(keyboardListener(kb))
-	a.keyboard = kb
-	a.keyboardVisible = true
 	return a
-}
-
-func sendKeyboardSequence(command uint16, sequence []byte) {
-	payload := make([]byte, len(sequence)+4)
-	copy(payload[:], util.GetWordArray(command))
-	copy(payload[2:], util.GetWordArray(uint16(len(sequence))))
-	copy(payload[4:], sequence[:])
-	network.SendTcpData(payload, "10.100.200.230")
-}
-
-// sendKeystrokes wraps a 0xff03 keystroke frame and writes it as a single
-// TCP packet — the common case for KEY/FUNCTION/COLOR(state<32) events.
-func sendKeystrokes(codes []byte) {
-	sendKeyboardSequence(0xff03, codes)
-}
-
-// buildPoke returns a single 0xff06 memory-poke frame
-// (opcode + length=3 + 2-byte addr + 1-byte data = 7 bytes), without
-// writing it. Multiple frames can be concatenated and sent via writeFrames
-// to mirror the Java buildCommand+write pattern.
-func buildPoke(addr uint16, data byte) []byte {
-	frame := make([]byte, 7)
-	copy(frame[0:2], util.GetWordArray(0xff06))
-	copy(frame[2:4], util.GetWordArray(3))
-	copy(frame[4:6], util.GetWordArray(addr))
-	frame[6] = data
-	return frame
-}
-
-// writeFrames concatenates pre-built frames and ships them as one TCP write.
-func writeFrames(frames ...[]byte) {
-	total := 0
-	for _, f := range frames {
-		total += len(f)
-	}
-	buf := make([]byte, 0, total)
-	for _, f := range frames {
-		buf = append(buf, f...)
-	}
-	network.SendTcpData(buf, "10.100.200.230")
-}
-
-// keyboardListener returns the KeyEvent handler attached to the
-// VirtualKeyboard. Mirrors the Java sendKeyboardSequence(Key) logic:
-// KEY/FUNCTION events and "normal-mode" COLOR events become 0xff03
-// keystrokes (with named buttons RUN/LIST/DIR/LOAD * expanding to BASIC
-// commands and code==3 triggering the RUN/STOP poke pair); COLOR events
-// while FRAME or BC option is latched become $D020/$D021 pokes.
-func keyboardListener(kb *VirtualKeyboard) func(KeyEvent) {
-	return func(ev KeyEvent) {
-		k := ev.Key
-		state := kb.OptionState()
-		code := ev.Code
-		fmt.Printf("vkb: %s/%q -> code=%d state=0x%02x\n", k.Type, k.Text, code, state)
-
-		if k.Type == "KEY" || k.Type == "FUNCTION" ||
-			(k.Type == "COLOR" && state < optFrameColor) {
-
-			if code == 3 {
-				writeFrames(buildPoke(0x0314, 0x7b), buildPoke(0x0091, 127))
-				writeFrames(buildPoke(0x0314, 0x31), buildPoke(0x0091, 255))
-				return
-			}
-
-			var codes []byte
-			switch k.Name {
-			case "RUN":
-				codes = append([]byte("RUN"), 13)
-			case "LIST":
-				codes = append([]byte("LIST"), 13)
-			case "DIR":
-				codes = append([]byte(`LOAD"$",8`), 13)
-			case "LOAD":
-				codes = append([]byte(`LOAD"*",8,1`), 13)
-			case "AUTO":
-				codes = append(append(append(append([]byte{},
-					[]byte(`LOAD"*",8,1`)...), 13),
-					[]byte(`RUN`)...), 13)
-
-			default:
-				if code < 0 {
-					return
-				}
-				codes = []byte{byte(code & 0xff)}
-			}
-			sendKeystrokes(codes)
-			return
-		}
-
-		if k.Type == "COLOR" {
-			var frames [][]byte
-			if state&optFrameColor != 0 {
-				frames = append(frames, buildPoke(0xd020, byte(k.Index)))
-			}
-			if state&optBC != 0 {
-				frames = append(frames, buildPoke(0xd021, byte(k.Index)))
-			}
-			if len(frames) > 0 {
-				writeFrames(frames...)
-			}
-		}
-	}
-}
-
-func buildDeviceList() []deviceUI {
-	cfg := config.GetConfig()
-	names := make([]string, 0, len(cfg.Devices))
-	for name := range cfg.Devices {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	devices := make([]deviceUI, 0, len(names))
-	for _, name := range names {
-		dev := cfg.Devices[name]
-		devices = append(devices, deviceUI{
-			name:        name,
-			description: dev.Description,
-			device:      dev,
-		})
-	}
-	return devices
 }
 
 // onlineCheckLoop polls all configured devices every 5 seconds to update
@@ -468,17 +366,17 @@ func (a *guiApp) run() {
 	}
 }
 
-// syncWindowSize resizes the gioui window so its content fits exactly: the
-// height tracks toolbar + optional monitor + optional keyboard + footer; the
-// width grows just enough to host the device cards plus a right column wide
-// enough for the (always full-width) keyboard, so monitor and keyboard line
-// up vertically without horizontal clipping. Called once per frame so flips
-// of videoActive / keyboardVisible take effect immediately.
+// computeTargetSize returns the window dimensions for the given content
+// state: toolbar + optional monitor + optional keyboard + footer for the
+// height, cards column plus a right column sized to fit the full keyboard
+// for the width.
 //
-// Heights are conservative estimates of the per-section sizes; if the cards
-// column ends up taller than the right column, gioui will honor that and the
-// window will simply contain a small amount of slack.
-func (a *guiApp) syncWindowSize() {
+// kb may be nil during early startup; in that case a default right-column
+// width is used. Heights are conservative estimates of the per-section
+// sizes; if the cards column ends up taller than the right column gioui
+// will honor that and the window will simply contain a small amount of
+// slack.
+func computeTargetSize(kb *VirtualKeyboard, hasActiveVideo, keyboardVisible bool) (w, h unit.Dp) {
 	const (
 		insetH      = unit.Dp(20) // top + bottom
 		insetW      = unit.Dp(20) // left + right (matches layoutRoot's UniformInset(10))
@@ -495,25 +393,16 @@ func (a *guiApp) syncWindowSize() {
 		defaultW    = unit.Dp(800)
 	)
 
-	hasActiveVideo := false
-	for i := range a.devices {
-		if a.devices[i].videoActive {
-			hasActiveVideo = true
-			break
-		}
-	}
-
-	// Compute the right column's natural width. We reserve enough room for
-	// the keyboard regardless of whether it is currently visible, so toggling
-	// the keyboard off does not shrink the monitor — the column width stays
-	// constant for the whole session.
+	// Reserve enough room for the keyboard regardless of whether it is
+	// currently visible, so toggling the keyboard off does not shrink the
+	// monitor — the column width stays constant for the whole session.
 	rightW := defaultW - insetW - cardsW - columnGapW
-	if a.keyboard != nil {
-		if kbW := a.keyboard.MaxWidthDp(); kbW > rightW {
+	if kb != nil {
+		if kbW := kb.MaxWidthDp(); kbW > rightW {
 			rightW = kbW
 		}
 	}
-	w := insetW + cardsW + columnGapW + rightW
+	w = insetW + cardsW + columnGapW + rightW
 	if w < defaultW {
 		w = defaultW
 	}
@@ -521,15 +410,33 @@ func (a *guiApp) syncWindowSize() {
 	// Monitor cell height is derived from the actual right-column width and
 	// the C64 aspect ratio, so the window grows tall enough for whatever
 	// width we settled on above.
-	h := insetH + toolbarH + topSpacerH + botSpacerH + separatorH + footSpacerH + footerH
+	h = insetH + toolbarH + topSpacerH + botSpacerH + separatorH + footSpacerH + footerH
 	if hasActiveVideo {
 		monitorH := unit.Dp(float32(rightW) * float32(imaging.HEIGHT) / float32(imaging.WIDTH))
 		h += monitorH
 	}
-	if a.keyboardVisible {
+	if keyboardVisible {
 		h += kbSpacerH + kbH
 	}
+	return w, h
+}
 
+// syncWindowSize resizes the gioui window so its content fits exactly.
+// Called once per frame so flips of videoActive / keyboardVisible take
+// effect immediately. No-op on Linux, where the window was pinned to its
+// worst-case size at construction (see linuxFixedSize).
+func (a *guiApp) syncWindowSize() {
+	if a.linuxFixedSize {
+		return
+	}
+	hasActiveVideo := false
+	for i := range a.devices {
+		if a.devices[i].videoActive {
+			hasActiveVideo = true
+			break
+		}
+	}
+	w, h := computeTargetSize(a.keyboard, hasActiveVideo, a.keyboardVisible)
 	if w == a.lastWindowW && h == a.lastWindowH {
 		return
 	}

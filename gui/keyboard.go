@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/color"
 	"strconv"
+	"strings"
 
 	"drazil.de/go64u/util"
 
@@ -115,6 +116,101 @@ type VirtualKeyboard struct {
 	// Indices used by HandlePhysicalKey. Built once in NewVirtualKeyboard.
 	keyByText     map[string]*keyCell // by Key.Text (digits, letters, punctuation)
 	keyByPhysName map[key.Name]*keyCell
+	keyByASCII    map[rune]*keyCell // any cell whose CodeOptions hits printable ASCII
+
+	// Active host keyboard layout. Set once at construction; we don't poll
+	// for live layout switches.
+	layout kbLayout
+}
+
+// isLetterName reports whether name is a single ASCII upper-case letter — the
+// form gioui uses for letter keys (Name is unicode.ToUpper'd; Shift state is
+// reported separately via Modifiers).
+func isLetterName(name key.Name) bool {
+	return len(name) == 1 && name[0] >= 'A' && name[0] <= 'Z'
+}
+
+// kbLayout identifies the active host keyboard layout. We need to know it
+// because gioui's Windows backend reports a fixed VK→Name string and never
+// the typed glyph, so the same Name+Modifiers means different things on
+// QWERTY vs QWERTZ.
+type kbLayout int
+
+const (
+	layoutUS kbLayout = iota
+	layoutDE
+)
+
+// hostSymbol holds the ASCII rune a host produces for a given gioui key.Name
+// in the unshifted and shifted state. A zero rune means "no PETSCII mapping
+// for this combination" (e.g. DE Shift+3 yields '§', which the C64 has no
+// glyph for) — those events are silently dropped.
+type hostSymbol struct{ plain, shifted rune }
+
+// usSymbol kept as an alias so existing call sites stay readable.
+type usSymbol = hostSymbol
+
+// usHostSymbol covers the digit row and the OEM symbol keys on a US-QWERTY
+// physical keyboard. We need this because gioui's Windows backend reports
+// Name from a fixed VK→string table (see app/os_windows.go convertKeyCode):
+// it is not layout-aware and not Shift-aware, so the same Name arrives for
+// both `,` and `<`, both `[` and `{`, etc., with the actual Shift state
+// only present in Modifiers. Worse, VK_OEM_PLUS (the `=`/`+` key) is hard-
+// coded to Name "+" even unshifted, so we can't read Name as "the typed
+// glyph" and have to translate explicitly here.
+//
+// US-only for now; non-US layouts will mis-map and need their own table.
+var usHostSymbol = map[key.Name]usSymbol{
+	"1":  {'1', '!'},
+	"2":  {'2', '@'},
+	"3":  {'3', '#'},
+	"4":  {'4', '$'},
+	"5":  {'5', '%'},
+	"6":  {'6', '^'},
+	"7":  {'7', '&'},
+	"8":  {'8', '*'},
+	"9":  {'9', '('},
+	"0":  {'0', ')'},
+	"-":  {'-', '_'},
+	"+":  {'=', '+'}, // VK_OEM_PLUS — gioui labels the `=` key "+"
+	"[":  {'[', '{'},
+	"]":  {']', '}'},
+	";":  {';', ':'},
+	"'":  {'\'', '"'},
+	",":  {',', '<'},
+	".":  {'.', '>'},
+	"/":  {'/', '?'},
+	"\\": {'\\', '|'},
+	"`":  {'`', '~'},
+}
+
+// deHostSymbol covers a German QWERTZ physical keyboard. Only entries that
+// can produce something the C64 knows are listed; AltGr-reachable glyphs
+// (`@` `[` `]` `{` `}` `|` `\`) are omitted because gioui's key.Event does
+// not surface AltGr distinctly from Ctrl+Alt and we'd mis-route them.
+var deHostSymbol = map[key.Name]hostSymbol{
+	"0": {'0', '='}, // shift+0 = '='
+	"1": {'1', '!'},
+	"2": {'2', '"'}, // shift+2 = '"'
+	"3": {'3', 0},   // shift+3 = '§', no C64 glyph
+	"4": {'4', '$'},
+	"5": {'5', '%'},
+	"6": {'6', '&'},
+	"7": {'7', '/'}, // shift+7 = '/'
+	"8": {'8', '('},
+	"9": {'9', ')'},
+	"+": {'+', '*'}, // VK_OEM_PLUS on DE: '+' / '*'
+	"-": {'-', '_'}, // VK_OEM_MINUS on DE: '-' / '_'
+	",": {',', ';'}, // VK_OEM_COMMA on DE: ',' / ';'
+	".": {'.', ':'}, // VK_OEM_PERIOD on DE: '.' / ':'
+}
+
+// hostSymbolTable returns the symbol-translation table for the active layout.
+func hostSymbolTable(l kbLayout) map[key.Name]hostSymbol {
+	if l == layoutDE {
+		return deHostSymbol
+	}
+	return usHostSymbol
 }
 
 // NewVirtualKeyboard parses the embedded layout and builds the runtime cells.
@@ -139,9 +235,15 @@ func NewVirtualKeyboard(listener func(KeyEvent)) (*VirtualKeyboard, error) {
 	if listener != nil {
 		vk.listeners = append(vk.listeners, listener)
 	}
+	vk.layout = detectHostLayout()
 	vk.buildKeyIndices()
 	return vk, nil
 }
+
+// SetLayout overrides the auto-detected host keyboard layout. Useful when
+// the user wants to force a specific mapping (e.g. running a US layout on
+// a DE-detected system, or vice versa).
+func (vk *VirtualKeyboard) SetLayout(l kbLayout) { vk.layout = l }
 
 // buildKeyIndices populates the lookup maps used by HandlePhysicalKey. KEY/
 // COLOR/FUNCTION cells with non-empty Text become entries in keyByText; the
@@ -150,6 +252,7 @@ func NewVirtualKeyboard(listener func(KeyEvent)) (*VirtualKeyboard, error) {
 // Name or Text.
 func (vk *VirtualKeyboard) buildKeyIndices() {
 	vk.keyByText = map[string]*keyCell{}
+	vk.keyByASCII = map[rune]*keyCell{}
 	byJSONName := map[string]*keyCell{}
 	for _, row := range vk.rows {
 		for _, c := range row {
@@ -162,6 +265,32 @@ func (vk *VirtualKeyboard) buildKeyIndices() {
 				}
 				if c.key.Name != "" {
 					byJSONName[c.key.Name] = c
+				}
+			}
+			// Index every printable-ASCII PETSCII this cell can emit.
+			// First-write-wins so the plain (codeOptions[0]) cell wins
+			// over a shift/commodore slot on a different cell.
+			if t == "KEY" {
+				for slot, opt := range c.key.CodeOptions {
+					if opt == nil {
+						continue
+					}
+					n, err := strconv.Atoi(strings.TrimSpace(*opt))
+					if err != nil || n < 32 || n > 126 {
+						continue
+					}
+					r := rune(n)
+					existing, ok := vk.keyByASCII[r]
+					if !ok {
+						vk.keyByASCII[r] = c
+						continue
+					}
+					// Prefer the cell where this rune lives in the plain
+					// slot — that's the "natural" home for the char.
+					if slot == codePlain {
+						vk.keyByASCII[r] = c
+						_ = existing
+					}
 				}
 			}
 		}
@@ -196,24 +325,77 @@ func (vk *VirtualKeyboard) buildKeyIndices() {
 }
 
 // HandlePhysicalKey resolves a host-keyboard event to a virtual cell and fires
-// the listener, mirroring a mouse click. Modifier flags are translated into
-// the same optionState bits the on-screen OPTION cells produce, then OR'd
-// with the current latched state so a physical Shift+A works regardless of
-// whether the on-screen SHIFT is toggled.
+// the listener, mirroring a mouse click.
+//
+// Why this is more involved than it looks: gioui's Windows backend hands us
+// Name from a fixed VK→string table that isn't layout- or Shift-aware
+// (see usHostSymbol). We can't trust Name to be the typed glyph, so the
+// routing is split:
+//
+//  1. Special keys (RETURN, arrows, F1..F8, HOME, INSERT, …) — direct
+//     keyByPhysName lookup with the modifier bits OR'd into optionState.
+//  2. Letters A..Z — keyByText lookup; ModShift selects the C64 shifted-
+//     letter PETSCII slot (193..218) and Ctrl/Alt the Commodore/CT slot.
+//  3. Ctrl/Alt held on a non-letter (host Ctrl+, → C64 Commodore+,) —
+//     keyByText lookup with the same state path so the Commodore/CT slot
+//     is reached.
+//  4. Plain or Shift-only on a non-letter symbol — translate (Name, Shift)
+//     through usHostSymbol to the ASCII rune the host actually produces,
+//     then look up the C64 cell that emits that PETSCII (keyByASCII) and
+//     fire the literal rune as Code.
 //
 // Returns true when the event matched a cell.
 func (vk *VirtualKeyboard) HandlePhysicalKey(name key.Name, mods key.Modifiers) bool {
-	cell := vk.keyByPhysName[name]
-	if cell == nil {
-		// Single-character keys: gioui reports e.g. "A", "1", "+" in Name.
-		cell = vk.keyByText[string(name)]
+	if cell := vk.keyByPhysName[name]; cell != nil {
+		vk.fire(KeyEvent{Key: cell.key, Code: cell.key.resolveCode(vk.modState(mods, true))})
+		return true
 	}
-	if cell == nil {
+
+	if isLetterName(name) {
+		if cell := vk.keyByText[string(name)]; cell != nil {
+			vk.fire(KeyEvent{Key: cell.key, Code: cell.key.resolveCode(vk.modState(mods, true))})
+			return true
+		}
 		return false
 	}
 
+	// Ctrl/Alt on a non-letter: prefer the cell-by-name + state path so the
+	// Commodore/CT PETSCII slot is reached (e.g. host Ctrl+, → C64
+	// Commodore+, → 60). Falls through to the lookup table if no cell match.
+	if mods&(key.ModCtrl|key.ModCommand|key.ModAlt) != 0 {
+		if cell := vk.keyByText[string(name)]; cell != nil {
+			vk.fire(KeyEvent{Key: cell.key, Code: cell.key.resolveCode(vk.modState(mods, true))})
+			return true
+		}
+	}
+
+	// Plain or Shift-only on a non-letter: translate to the ASCII the host
+	// actually produces (via the active layout's table), then find the C64
+	// cell whose PETSCII matches.
+	if sym, ok := hostSymbolTable(vk.layout)[name]; ok {
+		r := sym.plain
+		if mods&key.ModShift != 0 {
+			r = sym.shifted
+		}
+		if r == 0 {
+			return false // shifted glyph has no C64 equivalent (e.g. DE '§')
+		}
+		if cell := vk.keyByASCII[r]; cell != nil {
+			vk.fire(KeyEvent{Key: cell.key, Code: int(r)})
+			return true
+		}
+		return false
+	}
+	return false
+}
+
+// modState OR's host modifier bits into the latched optionState. includeShift
+// is true for letter and special-key paths where Shift is a real modifier;
+// it is false for the non-letter lookup path where Shift is consumed by the
+// usHostSymbol translation instead.
+func (vk *VirtualKeyboard) modState(mods key.Modifiers, includeShift bool) int {
 	state := vk.optionState
-	if mods&key.ModShift != 0 {
+	if includeShift && mods&key.ModShift != 0 {
 		state |= optShift
 	}
 	if mods&(key.ModCtrl|key.ModCommand) != 0 {
@@ -222,8 +404,7 @@ func (vk *VirtualKeyboard) HandlePhysicalKey(name key.Name, mods key.Modifiers) 
 	if mods&key.ModAlt != 0 {
 		state |= optCT
 	}
-	vk.fire(KeyEvent{Key: cell.key, Code: cell.key.resolveCode(state)})
-	return true
+	return state
 }
 
 // AddListener registers an extra callback. Mirrors Java's addHitKeyListener.
@@ -296,7 +477,7 @@ func (k *Key) resolveCode(state int) int {
 	if idx >= len(k.CodeOptions) || k.CodeOptions[idx] == nil {
 		return -1
 	}
-	v, err := strconv.Atoi(*k.CodeOptions[idx])
+	v, err := strconv.Atoi(strings.TrimSpace(*k.CodeOptions[idx]))
 	if err != nil {
 		return -1
 	}

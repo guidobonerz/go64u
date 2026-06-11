@@ -21,18 +21,19 @@ type Overlay struct {
 }
 
 type Config struct {
-	Password         string             `yaml:"Password"`
-	Devices          map[string]*Device `yaml:"Devices"`
-	ScreenshotFolder string             `yaml:"ScreenshotFolder"`
-	DumpFolder       string             `yaml:"DumpFolder"`
-	RecordingFolder  string             `yaml:"RecordingFolder"`
-	DownloadFolder   string             `yaml:"DownloadFolder"`
-	SelectedDevice   string             `yaml:"-"`
-	StreamingTargets map[string]string  `yaml:"StreamingTargets"`
-	LogLevel         string             `yaml:"LogLevel"`
-	ResourceUrl      string             `yaml:"ResourceUrl"`
-	DatabaseClient   string             `yaml:"DatabaseClient"`
-	Overlay          Overlay            `yaml:"Overlay"`
+	VirtualKeyboardActive bool               `yaml:"VirtualKeyboardActive"`
+	Password              string             `yaml:"Password"`
+	Devices               map[string]*Device `yaml:"Devices"`
+	ScreenshotFolder      string             `yaml:"ScreenshotFolder"`
+	DumpFolder            string             `yaml:"DumpFolder"`
+	RecordingFolder       string             `yaml:"RecordingFolder"`
+	DownloadFolder        string             `yaml:"DownloadFolder"`
+	SelectedDevice        string             `yaml:"-"`
+	StreamingTargets      map[string]string  `yaml:"StreamingTargets"`
+	LogLevel              string             `yaml:"LogLevel"`
+	ResourceUrl           string             `yaml:"ResourceUrl"`
+	DatabaseClient        string             `yaml:"DatabaseClient"`
+	Overlay               Overlay            `yaml:"Overlay"`
 }
 
 type Device struct {
