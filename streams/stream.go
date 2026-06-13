@@ -35,7 +35,11 @@ func getUdpConnection(port int) (*net.UDPConn, error) {
 		}
 		panic(err)
 	}
-	//defer socket.Close()
+
+	if err := socket.SetReadBuffer(4 << 20); err != nil {
+		fmt.Println("Warning: could not enlarge UDP receive buffer:", err)
+	}
+
 	return socket, err
 }
 func AudioStart(device *config.Device) {

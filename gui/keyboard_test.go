@@ -2,9 +2,6 @@ package gui
 
 import "testing"
 
-// TestKeyboardLayoutParses guards against the embedded JSON drifting from the
-// Key/KeyMatrix shape (e.g. a typo in a field tag, an unexpected null in
-// codeOptions, or a missing inner displayOptions row).
 func TestKeyboardLayoutParses(t *testing.T) {
 	vk, err := NewVirtualKeyboard(nil)
 	if err != nil {
@@ -26,8 +23,6 @@ func TestKeyboardLayoutParses(t *testing.T) {
 		}
 	}
 
-	// The SHIFT OPTION key must have index == optShift; same kind of spot-check
-	// for COMMODORE. These mappings are load-bearing for the modifier logic.
 	var sawShift, sawCBM bool
 	for _, row := range vk.rows {
 		for _, c := range row {
