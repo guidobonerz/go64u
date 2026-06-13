@@ -362,7 +362,7 @@ Overlay:
 
 > **Note:** If you have more than one Ultimate64 board, you have to choose different ports for each board.
 
-> **Note:** If you want to stream the U64 stream via RTMP to Twitch, YouTube, etc. you need to install ffmpeg.
+> **Note:** Since version 0.6+, a separate installation of ffmpeg is no longer needed
 
 ---
 
