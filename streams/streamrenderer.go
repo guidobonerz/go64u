@@ -20,37 +20,37 @@ const outputW = 1280
 const outputH = 720
 
 type StreamRenderer struct {
-	Fps            int
-	ScaleFactor    int
-	Url            string
-	LogLevel       string
-	RecordPath     string // if set, also record to this file
-	RecordMode     string // "audio", "video", or "both"
-	NoOverlay      string // disable overlay for: "stream", "record", or "both"
-	cancel         context.CancelFunc
-	pipeline       *OutputPipeline
-	recordPipeline *OutputPipeline
-	ctx            context.Context
-	config         StreamConfig
-	frameCount     int
-	overlayImg     image.Image // loaded once in Init, nil if no overlay
-	bgraBuf        []byte      // reused BGRA output buffer
-	recordBuf      []byte      // reused BGRA buffer for clean recording frames (nil when not needed)
-	nativeBuf      bool        // true when bgraBuf is at native resolution (no overlay)
-	sigChan            chan os.Signal
-	dualPipeline       bool // true when stream and record have different overlay settings
-	streamWithOverlay  bool // whether the stream output gets the overlay
-	recordWithOverlay  bool // whether the record output gets the overlay
-	overlayEnabled     atomic.Bool // live toggle from GUI, read per-frame
-	forceKeyframe      atomic.Bool // request IDR on next frame after overlay toggle
-	crtEnabled         atomic.Bool // CRT scanline effect toggle
-	crtFactors         []uint16   // cached scanline brightness factors
-	crtFactorsDstH     int        // dstH the factors were computed for
-	crtFactorsSrcH     int        // srcH the factors were computed for
-	zeroBuf            []byte      // pre-zeroed buffer for fast clear via copy()
-	paletteLUT         [16]bgraColor // pre-built BGRA lookup table for C64 palette
-	paletteLUTReady    bool
-	reusableImg        *imaging.ReusablePalettedImage // zero-alloc frame decoder
+	Fps               int
+	ScaleFactor       int
+	Url               string
+	LogLevel          string
+	RecordPath        string
+	RecordMode        string
+	NoOverlay         string
+	cancel            context.CancelFunc
+	pipeline          *OutputPipeline
+	recordPipeline    *OutputPipeline
+	ctx               context.Context
+	config            StreamConfig
+	frameCount        int
+	overlayImg        image.Image
+	bgraBuf           []byte
+	recordBuf         []byte
+	nativeBuf         bool
+	sigChan           chan os.Signal
+	dualPipeline      bool
+	streamWithOverlay bool
+	recordWithOverlay bool
+	overlayEnabled    atomic.Bool
+	forceKeyframe     atomic.Bool
+	crtEnabled        atomic.Bool
+	crtFactors        []uint16
+	crtFactorsDstH    int
+	crtFactorsSrcH    int
+	zeroBuf           []byte
+	paletteLUT        [16]bgraColor
+	paletteLUTReady   bool
+	reusableImg       *imaging.ReusablePalettedImage
 }
 
 type bgraColor struct{ b, g, r, a byte }
@@ -87,7 +87,6 @@ func (d *StreamRenderer) Init() error {
 		return fmt.Errorf("no streaming target or recording path specified")
 	}
 
-	// Load overlay image if configured
 	overlay := config.GetConfig().Overlay
 	if overlay.ImagePath != "" {
 		f, err := os.Open(overlay.ImagePath)
@@ -112,7 +111,6 @@ func (d *StreamRenderer) Init() error {
 	noOverlayStream := d.NoOverlay == "stream" || d.NoOverlay == "both"
 	noOverlayRecord := d.NoOverlay == "record" || d.NoOverlay == "both"
 
-	// Strip overlay image if disabled for all outputs
 	if noOverlayStream && noOverlayRecord {
 		d.overlayImg = nil
 	}
@@ -121,11 +119,8 @@ func (d *StreamRenderer) Init() error {
 	d.recordWithOverlay = d.overlayImg != nil && !noOverlayRecord && hasRecord
 	d.overlayEnabled.Store(d.streamWithOverlay || d.recordWithOverlay)
 
-	// Need dual pipeline when streaming + recording have different overlay settings
 	d.dualPipeline = hasStream && hasRecord && d.streamWithOverlay != d.recordWithOverlay
 
-	// Allocate BGRA buffers: native resolution when no overlay, full 1920x1080 when overlay.
-	// Native resolution is ~20x smaller (384x272 = 417KB vs 1920x1080 = 8MB).
 	anyOverlay := d.streamWithOverlay || d.recordWithOverlay
 	if anyOverlay {
 		bufSize := outputW * outputH * 4
@@ -133,7 +128,7 @@ func (d *StreamRenderer) Init() error {
 		d.zeroBuf = make([]byte, bufSize)
 		d.nativeBuf = false
 	} else {
-		// Will be resized on first frame when we know the native dimensions
+
 		d.nativeBuf = true
 	}
 
@@ -155,11 +150,9 @@ func (d *StreamRenderer) Init() error {
 
 func (d *StreamRenderer) srcDims(withOverlay bool) (int, int) {
 	if withOverlay {
-		return outputW, outputH // overlay needs full resolution
+		return outputW, outputH
 	}
-	// 16:9 buffer at native height (272) to preserve aspect ratio.
-	// 272 * 16/9 = 483.6 → 484 (must be even for YUV420P).
-	// The 384px game image is centered with black bars on each side.
+
 	return 484, 272
 }
 
@@ -217,7 +210,6 @@ func (d *StreamRenderer) initDualPipeline() error {
 
 	var err error
 
-	// Dual pipeline: both get full resolution since the overlay pipeline forces 1920x1080 buffers
 	d.pipeline, err = NewOutputPipeline(d.Url, "flv", d.config, "", outputW, outputH)
 	if err != nil {
 		return fmt.Errorf("failed to create stream pipeline: %w", err)
@@ -234,15 +226,10 @@ func (d *StreamRenderer) initDualPipeline() error {
 	return nil
 }
 
-// Render renders a frame using the current wall-clock time as capture time.
-// Used by the CLI path where no separate capture timestamp is available.
 func (d *StreamRenderer) Render(data []byte) bool {
 	return d.RenderAt(data, time.Now())
 }
 
-// RenderAt renders a frame with an explicit capture timestamp. The timestamp
-// is propagated through the encoder so that PTS reflects when the frame was
-// actually captured at the source, independent of pipeline jitter & drops.
 func (d *StreamRenderer) RenderAt(data []byte, captureTime time.Time) bool {
 	select {
 	case <-d.ctx.Done():
@@ -260,7 +247,7 @@ func (d *StreamRenderer) RenderAt(data []byte, captureTime time.Time) bool {
 		if d.frameCount == 1 {
 			bounds := img.Bounds()
 			fmt.Printf("[Frame %d] Image size: %dx%d\n", d.frameCount, bounds.Dx(), bounds.Dy())
-			// Lazy-alloc native buffer on first frame
+
 			if d.nativeBuf && d.bgraBuf == nil {
 				srcW, srcH := d.srcDims(false)
 				bufSize := srcW * srcH * 4
@@ -271,10 +258,8 @@ func (d *StreamRenderer) RenderAt(data []byte, captureTime time.Time) bool {
 			}
 		}
 
-		// Read overlay state once per frame (atomic, set by GUI thread)
 		useOverlay := d.overlayEnabled.Load()
 
-		// Force keyframe on overlay state change for clean scene transition
 		if d.forceKeyframe.CompareAndSwap(true, false) {
 			if d.pipeline != nil {
 				d.pipeline.RequestKeyframe()
@@ -320,7 +305,6 @@ func (d *StreamRenderer) composeFrameInto(buf []byte, gameImg image.Image, withO
 	srcW := bounds.Dx()
 	srcH := bounds.Dy()
 
-	// Build palette LUT once (palette never changes across frames)
 	if pal, ok := gameImg.(*image.Paletted); ok && !d.paletteLUTReady {
 		for i, c := range pal.Palette {
 			if i >= 16 {
@@ -332,14 +316,11 @@ func (d *StreamRenderer) composeFrameInto(buf []byte, gameImg image.Image, withO
 		d.paletteLUTReady = true
 	}
 
-	// Native mode: no scaling, just palette->BGRA at native resolution.
-	// swscale handles upscaling to 1920x1080 in the encoder pipeline.
 	if d.nativeBuf && !withOverlay {
 		d.composeNative(buf, gameImg)
 		return
 	}
 
-	// Overlay/scaled mode: compose at 1920x1080
 	copy(buf, d.zeroBuf)
 
 	var dstX, dstY, dstW, dstH int
@@ -351,7 +332,7 @@ func (d *StreamRenderer) composeFrameInto(buf []byte, gameImg image.Image, withO
 		dstW = overlay.WITH
 		dstH = overlay.HEIGHT
 	} else {
-		// No overlay: scale to max height, center horizontally
+
 		dstH = outputH
 		dstW = srcW * outputH / srcH
 		dstX = (outputW - dstW) / 2
@@ -402,33 +383,25 @@ func (d *StreamRenderer) composeFrameInto(buf []byte, gameImg image.Image, withO
 		}
 	}
 
-	// Apply CRT scanlines to the game rectangle BEFORE drawing the overlay
 	if d.crtEnabled.Load() {
 		d.applyScanlinesRect(buf, d.bufWidth(), dstX, dstY, dstW, dstH, srcH)
 	}
 
-	// Draw overlay on top of the game
 	if withOverlay && d.overlayImg != nil {
 		blitToBGRA(buf, d.overlayImg, 0, 0, outputW, outputH, outputW)
 	}
 }
 
-// composeNative converts paletted image to BGRA at native resolution (no scaling).
-// swscale in the encoder pipeline handles upscaling to 1920x1080.
-// This is ~20x less data than composing at 1920x1080 (417KB vs 8MB).
-// composeNative converts paletted image to BGRA at native resolution, centered
-// in a 16:9 buffer (484x272) with black bars on the sides for correct aspect ratio.
 func (d *StreamRenderer) composeNative(buf []byte, gameImg image.Image) {
-	// Clear buffer (black bars)
+
 	copy(buf, d.zeroBuf)
 
 	bounds := gameImg.Bounds()
 	srcW := bounds.Dx()
 	srcH := bounds.Dy()
 
-	// Buffer width from srcDims (484 for 16:9 at height 272)
 	bufW := len(buf) / (srcH * 4)
-	dstX := (bufW - srcW) / 2 // center horizontally
+	dstX := (bufW - srcW) / 2
 
 	if pal, ok := gameImg.(*image.Paletted); ok {
 		lut := &d.paletteLUT
@@ -464,8 +437,6 @@ func (d *StreamRenderer) composeNative(buf []byte, gameImg image.Image) {
 	}
 }
 
-// blitToBGRA alpha-blends an image onto the BGRA buffer.
-// Transparent pixels are skipped, semi-transparent pixels are blended.
 func blitToBGRA(buf []byte, img image.Image, dstX, dstY, dstW, dstH, stride int) {
 	bounds := img.Bounds()
 	maxX := bounds.Dx()
@@ -477,7 +448,6 @@ func blitToBGRA(buf []byte, img image.Image, dstX, dstY, dstW, dstH, stride int)
 		maxY = dstH - dstY
 	}
 
-	// Fast path for *image.NRGBA (common PNG decode result)
 	if nrgba, ok := img.(*image.NRGBA); ok {
 		for y := range maxY {
 			srcOff := (bounds.Min.Y+y-nrgba.Rect.Min.Y)*nrgba.Stride + (bounds.Min.X-nrgba.Rect.Min.X)*4
@@ -550,11 +520,11 @@ func (d *StreamRenderer) GetContext() context.Context {
 
 func (d *StreamRenderer) Shutdown() {
 	fmt.Println("\n=== Shutting down stream ===")
-	// Unregister signal handler so Ctrl+C returns to normal after stream stops
+
 	if d.sigChan != nil {
 		signal.Stop(d.sigChan)
 	}
-	// Cancel context first so Render loop and AudioReader stop sending frames
+
 	if d.cancel != nil {
 		d.cancel()
 	}
@@ -571,13 +541,11 @@ func (d *StreamRenderer) Shutdown() {
 	fmt.Println("Shutdown complete")
 }
 
-// SetCrt toggles the CRT scanline effect at runtime (thread-safe).
 func (d *StreamRenderer) SetCrt(enabled bool) {
 	d.crtEnabled.Store(enabled)
 	d.forceKeyframe.Store(true)
 }
 
-// bufWidth returns the current BGRA buffer width based on overlay state.
 func (d *StreamRenderer) bufWidth() int {
 	if d.nativeBuf {
 		w, _ := d.srcDims(false)
@@ -586,9 +554,6 @@ func (d *StreamRenderer) bufWidth() int {
 	return outputW
 }
 
-// applyScanlinesRect applies a CRT-style smooth scanline gradient within a
-// rectangle. Factors are cached and only recomputed when dstH or srcHeight
-// change, avoiding per-frame math.Sin calls.
 func (d *StreamRenderer) applyScanlinesRect(buf []byte, bufW, dstX, dstY, dstW, dstH, srcHeight int) {
 	if dstW <= 0 || dstH <= 0 || srcHeight <= 0 {
 		return
@@ -598,7 +563,6 @@ func (d *StreamRenderer) applyScanlinesRect(buf []byte, bufW, dstX, dstY, dstW, 
 		return
 	}
 
-	// Recompute factors only when dimensions change
 	if d.crtFactors == nil || d.crtFactorsDstH != dstH || d.crtFactorsSrcH != srcHeight {
 		const minBright = 0.45
 		d.crtFactors = make([]uint16, dstH)
@@ -630,9 +594,6 @@ func (d *StreamRenderer) applyScanlinesRect(buf []byte, bufW, dstX, dstY, dstW, 
 	}
 }
 
-// SetOverlay toggles the overlay compositing at runtime.
-// Thread-safe — uses atomic flag, applied at next frame boundary.
-// Forces a keyframe on the next frame to prevent flicker during scene change.
 func (d *StreamRenderer) SetOverlay(enabled bool) {
 	d.overlayEnabled.Store(enabled && d.overlayImg != nil)
 	d.forceKeyframe.Store(true)

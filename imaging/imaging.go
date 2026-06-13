@@ -79,19 +79,16 @@ func GetImageFromBytes(data []byte, scaleFactor int) image.Image {
 	return img
 }
 
-// ReusablePalettedImage is a pre-allocated paletted image for zero-alloc frame decoding.
 type ReusablePalettedImage struct {
 	img *image.Paletted
 }
 
-// NewReusablePalettedImage creates a reusable image buffer for stream decoding.
 func NewReusablePalettedImage() *ReusablePalettedImage {
 	return &ReusablePalettedImage{
 		img: image.NewPaletted(image.Rect(0, 0, WIDTH, HEIGHT), util.GetPalette()),
 	}
 }
 
-// Decode writes frame data into the reusable image and returns it. No allocation.
 func (r *ReusablePalettedImage) Decode(data []byte) *image.Paletted {
 	decodeInto(r.img, data)
 	return r.img

@@ -26,8 +26,6 @@ const (
 	wmDropFiles = 0x0233
 )
 
-// gwlpWndProc is -4 (signed). Use a runtime variable to coax Go past its
-// compile-time overflow check when converting a signed constant to uintptr.
 var gwlpWndProcIndex = -4
 
 func gwlpWndProc() uintptr {
@@ -43,10 +41,6 @@ var (
 	dropHandler func(clientX, clientY int, data []byte)
 )
 
-// dropWndProc is our subclassed window procedure. It handles WM_DROPFILES by
-// reading the first dropped file and invoking dropHandler with the client-area
-// drop point and the file bytes. All other messages are forwarded to the
-// original Gio WndProc.
 func dropWndProc(hwnd, msg, wParam, lParam uintptr) uintptr {
 	if msg == wmDropFiles {
 		hDrop := wParam
@@ -58,7 +52,7 @@ func dropWndProc(hwnd, msg, wParam, lParam uintptr) uintptr {
 			procDragQueryFileW.Call(hDrop, 0, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
 			path := syscall.UTF16ToString(buf)
 			x, y := int(pt.X), int(pt.Y)
-			// Read asynchronously so the window message loop isn't blocked.
+
 			go func(p string, cx, cy int) {
 				data, err := os.ReadFile(p)
 				if err != nil {
@@ -76,11 +70,6 @@ func dropWndProc(hwnd, msg, wParam, lParam uintptr) uintptr {
 	return ret
 }
 
-// enableFileDrop installs a Windows file-drop handler on the app window
-// matching the given title. It polls FindWindow until the HWND exists, then
-// subclasses the window procedure to intercept WM_DROPFILES. On drop, the
-// first file is read and handed to onDrop along with the client-area drop
-// point. onDrop may be called from an arbitrary goroutine.
 func enableFileDrop(windowTitle string, onDrop func(clientX, clientY int, data []byte)) {
 	dropHandler = onDrop
 	go func() {

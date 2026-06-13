@@ -13,17 +13,16 @@ import (
 
 type AudioReader struct {
 	Device       *config.Device
-	AudioContext *oto.Context                 // set for local playback mode
-	Renderer     renderer.UpdateAudioSpectrum // optional spectrum callback
+	AudioContext *oto.Context
+	Renderer     renderer.UpdateAudioSpectrum
 	StopChan     <-chan struct{}
-	WriteAudioFn func(data []byte) // set for streaming mode — forwards audio to encoder pipeline
+	WriteAudioFn func(data []byte)
 }
 
 func (ar *AudioReader) Read() {
 	socket := ar.Device.AudioUdpConnection
 	buffer := make([]byte, 770)
 
-	// Streaming mode: just forward audio to the encoder pipeline, no oto playback
 	if ar.WriteAudioFn != nil {
 		for {
 			select {
@@ -44,14 +43,9 @@ func (ar *AudioReader) Read() {
 		}
 	}
 
-	// Local playback mode: play through oto
 	pr, pw := io.Pipe()
 	player := ar.AudioContext.NewPlayer(pr)
-	// 100 ms @ 48 kHz stereo S16: 48000 * 2 * 2 / 10 = 19200 bytes. The
-	// previous 770*4 (~16 ms) was tight enough to cause underruns on Linux
-	// PipeWire/ALSA — anything below ~50 ms there crackles. Windows WASAPI
-	// and macOS CoreAudio handle it fine, but the larger buffer is harmless
-	// on those (just ~80 ms extra latency, imperceptible for a stream).
+
 	player.SetBufferSize(19200)
 	done := make(chan struct{})
 	go func() {
@@ -85,9 +79,7 @@ func (ar *AudioReader) Read() {
 					return
 				}
 			case <-time.After(500 * time.Millisecond):
-				// With a 100 ms player buffer, a write can legitimately block
-				// for a few hundred ms during normal back-pressure. Only flag
-				// this as truly stalled after 500 ms.
+
 				log.Println("Write timeout - player may be stalled")
 				if !player.IsPlaying() {
 					log.Println("player stopped. Restart")

@@ -17,16 +17,10 @@ func SendKeyboardSequence(command uint16, sequence []byte) {
 	network.SendTcpData(payload, "10.100.200.230")
 }
 
-// sendKeystrokes wraps a 0xff03 keystroke frame and writes it as a single
-// TCP packet — the common case for KEY/FUNCTION/COLOR(state<32) events.
 func sendKeystrokes(codes []byte) {
 	SendKeyboardSequence(0xff03, codes)
 }
 
-// buildPoke returns a single 0xff06 memory-poke frame
-// (opcode + length=3 + 2-byte addr + 1-byte data = 7 bytes), without
-// writing it. Multiple frames can be concatenated and sent via writeFrames
-// to mirror the Java buildCommand+write pattern.
 func buildPoke(addr uint16, data byte) []byte {
 	frame := make([]byte, 7)
 	copy(frame[0:2], util.GetWordArray(0xff06))
@@ -36,7 +30,6 @@ func buildPoke(addr uint16, data byte) []byte {
 	return frame
 }
 
-// writeFrames concatenates pre-built frames and ships them as one TCP write.
 func writeFrames(frames ...[]byte) {
 	total := 0
 	for _, f := range frames {
@@ -49,18 +42,33 @@ func writeFrames(frames ...[]byte) {
 	network.SendTcpData(buf, "10.100.200.230")
 }
 
-// keyboardListener returns the KeyEvent handler attached to the
-// VirtualKeyboard. Mirrors the Java sendKeyboardSequence(Key) logic:
-// KEY/FUNCTION events and "normal-mode" COLOR events become 0xff03
-// keystrokes (with named buttons RUN/LIST/DIR/LOAD * expanding to BASIC
-// commands and code==3 triggering the RUN/STOP poke pair); COLOR events
-// while FRAME or BC option is latched become $D020/$D021 pokes.
+func reassertReverse(codes []byte, state int) []byte {
+	if state&optReverse == 0 {
+		return codes
+	}
+	out := make([]byte, 0, len(codes)+2)
+	for _, c := range codes {
+		out = append(out, c)
+		if c == 13 {
+			out = append(out, 18)
+		}
+	}
+	return out
+}
+
 func KeyboardListener(kb *VirtualKeyboard) func(KeyEvent) {
 	return func(ev KeyEvent) {
 		k := ev.Key
 		state := kb.OptionState()
 		code := ev.Code
 		fmt.Printf("vkb: %s/%q -> code=%d state=0x%02x\n", k.Type, k.Text, code, state)
+
+		if k.Type == "OPTION" {
+			if code >= 0 {
+				sendKeystrokes([]byte{byte(code & 0xff)})
+			}
+			return
+		}
 
 		if k.Type == "KEY" || k.Type == "FUNCTION" ||
 			(k.Type == "COLOR" && state < optFrameColor) {
@@ -92,7 +100,7 @@ func KeyboardListener(kb *VirtualKeyboard) func(KeyEvent) {
 				}
 				codes = []byte{byte(code & 0xff)}
 			}
-			sendKeystrokes(codes)
+			sendKeystrokes(reassertReverse(codes, state))
 			return
 		}
 

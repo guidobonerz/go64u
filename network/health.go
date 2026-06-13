@@ -9,10 +9,6 @@ import (
 	"drazil.de/go64u/config"
 )
 
-// IsDeviceOnline returns true if the device responds to a lightweight HTTP
-// GET on /v1/version within the given timeout. Uses its own HTTP client so
-// it does not interfere with the long-running connections in http.go and is
-// silent on failures (suitable for GUI polling).
 func IsDeviceOnline(device *config.Device, timeout time.Duration) bool {
 	if device == nil || device.IpAddress == "" {
 		return false

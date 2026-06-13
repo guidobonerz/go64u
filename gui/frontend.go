@@ -10,7 +10,9 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"drazil.de/go64u/commands"
@@ -46,38 +48,88 @@ type guiApp struct {
 	otoCtx          *oto.Context
 	devices         []deviceUI
 	mu              sync.RWMutex
-	selectedIdx     int    // index of the currently selected device card (-1 if none)
-	hint            string // footer text, updated by layoutTopToolbar on hover
-	toolbarHeightPx int    // measured toolbar height in physical pixels, for drop-hit geometry
+	selectedIdx     int
+	hint            string
+	toolbarHeightPx int
 	dropMu          sync.Mutex
-	dropHits        []dropHit // rectangles (client-area px) of each visible monitor cell, updated each frame
+	dropHits        []dropHit
 
 	keyboard        *VirtualKeyboard
 	keyboardVisible bool
 	keyboardBtn     widget.Clickable
-	lastWindowW     unit.Dp  // last width passed to a.window.Option, to skip redundant resizes
-	lastWindowH     unit.Dp  // last height passed to a.window.Option, to skip redundant resizes
-	keyFocusTag     struct{} // unique per-app tag for the window-level physical-keyboard handler
+	lastWindowW     unit.Dp
+	lastWindowH     unit.Dp
+	keyFocusTag     struct{}
 
-	// linuxFixedSize is true on Linux. gioui v0.9.0 cannot resize a Wayland
-	// window after creation (xdg_toplevel size requests are dropped) and
-	// many tiling X11 WMs ignore client-initiated resizes too, so we lock
-	// the window to its worst-case dimensions at startup and skip the
-	// per-frame syncWindowSize calls.
 	linuxFixedSize bool
+
+	monStats monitorStats
+
+	testCardOp    paint.ImageOp
+	testCardReady bool
 }
 
-// dropHit maps a monitor cell's on-screen rectangle (in Windows client-area
-// pixels) to the originating device index. Used to route a file drop to the
-// device whose monitor the drop landed on, independently of selection.
+// monitorShown reports whether the video monitor area should be laid out. The
+// monitor follows the selected device and is always present when one is
+// selected: it shows that device's live stream, or the test pattern when the
+// device isn't streaming (stopped or offline).
+func (a *guiApp) monitorShown() bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.selectedIdx >= 0 && a.selectedIdx < len(a.devices)
+}
+
+func (a *guiApp) testCard() paint.ImageOp {
+	if !a.testCardReady {
+		a.testCardOp = paint.NewImageOp(makeTestCard())
+		a.testCardOp.Filter = paint.FilterNearest
+		a.testCardReady = true
+	}
+	return a.testCardOp
+}
+
+func makeTestCard() *image.RGBA {
+	const w, h = imaging.WIDTH, imaging.HEIGHT
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	bars := []color.RGBA{
+		{200, 200, 200, 255},
+		{200, 200, 0, 255},
+		{0, 200, 200, 255},
+		{0, 200, 0, 255},
+		{200, 0, 200, 255},
+		{200, 0, 0, 255},
+		{0, 0, 200, 255},
+	}
+	n := len(bars)
+	for x := 0; x < w; x++ {
+		c := bars[x*n/w]
+		for y := 0; y < h; y++ {
+			img.SetRGBA(x, y, c)
+		}
+	}
+	return img
+}
+
+type monitorStats struct {
+	lastReport time.Time
+	lastEvent  time.Time
+	events     int
+	maxGap     time.Duration
+	consumed   int
+	starved    int
+	trimmed    int
+	arrived    atomic.Int64
+}
+
+func debugLogEnabled() bool {
+	return strings.EqualFold(config.GetConfig().LogLevel, "debug")
+}
+
 type dropHit struct {
 	rect   image.Rectangle
 	devIdx int
 }
 
-// rawFrameMsg carries a raw paletted frame buffer together with the wall-clock
-// time it was captured from the UDP source. The capture time flows through to
-// the encoder so PTS reflects real time, independent of pipeline jitter/drops.
 type rawFrameMsg struct {
 	data        []byte
 	captureTime time.Time
@@ -90,19 +142,21 @@ type deviceUI struct {
 	toggle       widget.Clickable
 	active       bool
 	waveform     []byte
-	videoFrame   *image.NRGBA  // current video frame for monitor display
-	videoActive  bool          // true when video stream is running
-	audioPlaying bool          // true when audio reader is running
-	audioStopCh  chan struct{} // stop channel for audio reader (independent of device channel)
-	audioMonitor bool          // audio monitoring enabled
-	videoMonitor bool          // video monitoring enabled
-	recording    bool          // true when recording to file
-	casting      bool          // true when streaming to platform
-	overlayOn    bool          // overlay enabled for recording/casting
-	crtOn        bool          // CRT monitor style enabled
+	frameQueue   []monitorFrame
+	shownFrame   monitorFrame
+	nextFrameDue time.Time
+	videoActive  bool
+	audioPlaying bool
+	audioStopCh  chan struct{}
+	audioMonitor bool
+	videoMonitor bool
+	recording    bool
+	casting      bool
+	overlayOn    bool
+	crtOn        bool
 	recRenderer  *streams.StreamRenderer
 	castRenderer *streams.StreamRenderer
-	rawFrameCh   chan rawFrameMsg // channel for feeding raw frames + capture timestamps to cast/rec renderers
+	rawFrameCh   chan rawFrameMsg
 	audioBtn     widget.Clickable
 	videoBtn     widget.Clickable
 	recBtn       widget.Clickable
@@ -116,8 +170,8 @@ type deviceUI struct {
 	pauseBtn     widget.Clickable
 	paused       bool
 
-	online      bool      // live device reachability status
-	lastChecked time.Time // when the last online check completed
+	online      bool
+	lastChecked time.Time
 }
 
 var (
@@ -127,8 +181,8 @@ var (
 	colorInactive   = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
 	colorToggleOff  = color.NRGBA{R: 120, G: 120, B: 120, A: 255}
 	colorStrike     = color.NRGBA{R: 254, G: 0, B: 0, A: 255}
-	colorHoverWhite = color.NRGBA{R: 150, G: 255, B: 130, A: 255} // light green hover for white icons
-	colorHoverGray  = color.NRGBA{R: 0, G: 160, B: 0, A: 255}     // dark green hover for gray icons
+	colorHoverWhite = color.NRGBA{R: 150, G: 255, B: 130, A: 255}
+	colorHoverGray  = color.NRGBA{R: 0, G: 160, B: 0, A: 255}
 	colorWaveformBg = color.NRGBA{R: 0, G: 0, B: 0, A: 255}
 	colorWaveformFg = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
 	colorSeparator  = color.NRGBA{R: 80, G: 80, B: 80, A: 255}
@@ -170,9 +224,6 @@ func Run() {
 	app.Main()
 }
 
-// handleDrop routes a dropped file to the device whose monitor rect contains
-// the drop point. Falls back to the currently selected device when the drop
-// happens outside any visible monitor cell.
 func (a *guiApp) handleDrop(x, y int, data []byte) {
 	var devIdx = -1
 	a.dropMu.Lock()
@@ -208,10 +259,6 @@ func newApp() *guiApp {
 	}
 	<-readyChan
 
-	// Use system sans-serif fonts (Helvetica / Arial / Segoe UI depending on
-	// platform), and additionally register the embedded C64 Pro Mono face under
-	// the C64ProTypeface name so the virtual keyboard can pick it up for
-	// PETSCII glyphs while normal labels keep using the default system font.
 	c64Face, err := opentype.Parse(fonts.C64ProMonoSTYLE)
 	if err != nil {
 		panic(err)
@@ -234,19 +281,12 @@ func newApp() *guiApp {
 		devices[i].overlayOn = hasOverlay
 	}
 
-	// Build the virtual keyboard first so its MaxWidthDp can feed the
-	// initial window size — important on Linux where the window cannot be
-	// resized after creation (see guiApp.linuxFixedSize).
 	kb, err := NewVirtualKeyboard(nil)
 	if err != nil {
 		panic(err)
 	}
 	kb.AddListener(KeyboardListener(kb))
 
-	// Worst-case dimensions: video stream on AND keyboard visible. On Linux
-	// we pin Min/MaxSize to this so the compositor allocates the window at
-	// the right size on first map; on other platforms syncWindowSize will
-	// resize per frame.
 	maxW, maxH := computeTargetSize(kb, true, true)
 
 	w := new(app.Window)
@@ -259,7 +299,6 @@ func newApp() *guiApp {
 	}
 	w.Option(opts...)
 
-	// Start with the config's selected device highlighted (or first device)
 	selectedIdx := 0
 	selectedName := config.GetConfig().SelectedDevice
 	for i := range devices {
@@ -282,11 +321,8 @@ func newApp() *guiApp {
 	return a
 }
 
-// onlineCheckLoop polls all configured devices every 5 seconds to update
-// their online status. Runs as a background goroutine for the entire app
-// lifetime.
 func (a *guiApp) onlineCheckLoop() {
-	a.checkAllDevices() // immediate check on startup
+	a.checkAllDevices()
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	for range ticker.C {
@@ -294,8 +330,6 @@ func (a *guiApp) onlineCheckLoop() {
 	}
 }
 
-// checkAllDevices probes all configured devices in parallel and updates
-// their online state. Triggers a window redraw when any status changes.
 func (a *guiApp) checkAllDevices() {
 	var wg sync.WaitGroup
 	var anyChanged bool
@@ -325,8 +359,6 @@ func (a *guiApp) checkAllDevices() {
 	}
 }
 
-// layoutOnlineIndicator draws a small filled circle reflecting the device's
-// online status: gray = not yet checked, green = online, red = offline.
 func (a *guiApp) layoutOnlineIndicator(gtx layout.Context, dev *deviceUI) layout.Dimensions {
 	size := gtx.Dp(unit.Dp(10))
 	gtx.Constraints = layout.Exact(image.Pt(size, size))
@@ -354,38 +386,53 @@ func (a *guiApp) layoutOnlineIndicator(gtx layout.Context, dev *deviceUI) layout
 
 func (a *guiApp) run() {
 	var ops op.Ops
+
+	var ftN int
+	var ftLayout, ftLayoutMax, ftSubmit, ftSubmitMax time.Duration
+	ftReport := time.Now()
 	for {
 		switch e := a.window.Event().(type) {
 		case app.DestroyEvent:
 			return
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, e)
+			t0 := time.Now()
 			a.layoutRoot(gtx)
+			t1 := time.Now()
 			e.Frame(gtx.Ops)
+			t2 := time.Now()
+
+			ftN++
+			ftLayout += t1.Sub(t0)
+			ftLayoutMax = max(ftLayoutMax, t1.Sub(t0))
+			ftSubmit += t2.Sub(t1)
+			ftSubmitMax = max(ftSubmitMax, t2.Sub(t1))
+			if t2.Sub(ftReport) >= time.Second && ftN > 0 {
+				if debugLogEnabled() {
+					fmt.Printf("[frame] n=%d layout avg=%.1fms max=%.1fms | submit avg=%.1fms max=%.1fms\n",
+						ftN,
+						float64(ftLayout.Microseconds())/float64(ftN)/1000.0,
+						float64(ftLayoutMax.Microseconds())/1000.0,
+						float64(ftSubmit.Microseconds())/float64(ftN)/1000.0,
+						float64(ftSubmitMax.Microseconds())/1000.0)
+				}
+				ftN, ftLayout, ftLayoutMax, ftSubmit, ftSubmitMax = 0, 0, 0, 0, 0
+				ftReport = t2
+			}
 		}
 	}
 }
 
-// computeTargetSize returns the window dimensions for the given content
-// state: toolbar + optional monitor + optional keyboard + footer for the
-// height, cards column plus a right column sized to fit the full keyboard
-// for the width.
-//
-// kb may be nil during early startup; in that case a default right-column
-// width is used. Heights are conservative estimates of the per-section
-// sizes; if the cards column ends up taller than the right column gioui
-// will honor that and the window will simply contain a small amount of
-// slack.
 func computeTargetSize(kb *VirtualKeyboard, hasActiveVideo, keyboardVisible bool) (w, h unit.Dp) {
 	const (
-		insetH      = unit.Dp(20) // top + bottom
-		insetW      = unit.Dp(20) // left + right (matches layoutRoot's UniformInset(10))
+		insetH      = unit.Dp(20)
+		insetW      = unit.Dp(20)
 		cardsW      = unit.Dp(280)
 		columnGapW  = unit.Dp(10)
 		toolbarH    = unit.Dp(80)
 		topSpacerH  = unit.Dp(10)
 		kbSpacerH   = unit.Dp(10)
-		kbH         = unit.Dp(7 * 25) // 7 rows × 25dp cells
+		kbH         = unit.Dp(7 * 25)
 		botSpacerH  = unit.Dp(6)
 		separatorH  = unit.Dp(1)
 		footSpacerH = unit.Dp(4)
@@ -393,9 +440,6 @@ func computeTargetSize(kb *VirtualKeyboard, hasActiveVideo, keyboardVisible bool
 		defaultW    = unit.Dp(800)
 	)
 
-	// Reserve enough room for the keyboard regardless of whether it is
-	// currently visible, so toggling the keyboard off does not shrink the
-	// monitor — the column width stays constant for the whole session.
 	rightW := defaultW - insetW - cardsW - columnGapW
 	if kb != nil {
 		if kbW := kb.MaxWidthDp(); kbW > rightW {
@@ -407,9 +451,6 @@ func computeTargetSize(kb *VirtualKeyboard, hasActiveVideo, keyboardVisible bool
 		w = defaultW
 	}
 
-	// Monitor cell height is derived from the actual right-column width and
-	// the C64 aspect ratio, so the window grows tall enough for whatever
-	// width we settled on above.
 	h = insetH + toolbarH + topSpacerH + botSpacerH + separatorH + footSpacerH + footerH
 	if hasActiveVideo {
 		monitorH := unit.Dp(float32(rightW) * float32(imaging.HEIGHT) / float32(imaging.WIDTH))
@@ -421,22 +462,11 @@ func computeTargetSize(kb *VirtualKeyboard, hasActiveVideo, keyboardVisible bool
 	return w, h
 }
 
-// syncWindowSize resizes the gioui window so its content fits exactly.
-// Called once per frame so flips of videoActive / keyboardVisible take
-// effect immediately. No-op on Linux, where the window was pinned to its
-// worst-case size at construction (see linuxFixedSize).
 func (a *guiApp) syncWindowSize() {
 	if a.linuxFixedSize {
 		return
 	}
-	hasActiveVideo := false
-	for i := range a.devices {
-		if a.devices[i].videoActive {
-			hasActiveVideo = true
-			break
-		}
-	}
-	w, h := computeTargetSize(a.keyboard, hasActiveVideo, a.keyboardVisible)
+	w, h := computeTargetSize(a.keyboard, a.monitorShown(), a.keyboardVisible)
 	if w == a.lastWindowW && h == a.lastWindowH {
 		return
 	}
@@ -446,14 +476,9 @@ func (a *guiApp) syncWindowSize() {
 }
 
 func (a *guiApp) layoutRoot(gtx layout.Context) layout.Dimensions {
-	// Resize the window to fit current content (monitor + optional keyboard)
-	// before painting the frame, so the bottom of the window always lines up
-	// just below the footer with no leftover empty space.
+
 	a.syncWindowSize()
 
-	// Physical-keyboard input: register our focus tag with the input router,
-	// drain any key events queued for it, and re-request focus so the tag
-	// keeps receiving events even after the user clicks other widgets.
 	event.Op(gtx.Ops, &a.keyFocusTag)
 	for {
 		ev, ok := gtx.Event(
@@ -473,12 +498,9 @@ func (a *guiApp) layoutRoot(gtx layout.Context) layout.Dimensions {
 		gtx.Execute(key.FocusCmd{Tag: &a.keyFocusTag})
 	}
 
-	// Dark background
 	defer clip.Rect{Max: gtx.Constraints.Max}.Push(gtx.Ops).Pop()
 	paint.Fill(gtx.Ops, colorBackground)
 
-	// Pre-pass: handle card-click selection BEFORE rendering any card, so all
-	// cards see the same selectedIdx during this frame.
 	for i := range a.devices {
 		if a.devices[i].cardClick.Clicked(gtx) {
 			a.selectedIdx = i
@@ -488,28 +510,19 @@ func (a *guiApp) layoutRoot(gtx layout.Context) layout.Dimensions {
 
 	return layout.Inset{Top: 10, Bottom: 10, Left: 10, Right: 10}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			// Top: context-dependent toolbar for the currently selected device
+
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				dims := a.layoutTopToolbar(gtx)
 				a.toolbarHeightPx = dims.Size.Y
 				return dims
 			}),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
-			// Middle: horizontal split -- cards on the left, video monitor on the right (monitor mode).
-			// Rigid (not Flexed) so the row only takes its natural height; any
-			// remaining vertical space is absorbed by the trailing Flexed below
-			// the footer instead of opening a gap above it.
+
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				hasActiveVideo := false
-				for i := range a.devices {
-					if a.devices[i].videoActive {
-						hasActiveVideo = true
-						break
-					}
-				}
+				showMonitor := a.monitorShown()
 
 				return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceEnd}.Layout(gtx,
-					// Left column: vertical list of device cards
+
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						cardW := gtx.Dp(unit.Dp(280))
 						gtx.Constraints.Max.X = cardW
@@ -528,16 +541,13 @@ func (a *guiApp) layoutRoot(gtx layout.Context) layout.Dimensions {
 						}
 						return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 					}),
-					// Spacer between left cards and right monitor
+
 					layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
-					// Right column: video monitor on top, virtual keyboard
-					// stacked beneath it. Keeping them as siblings in a
-					// vertical flex prevents the monitor's fixed-aspect
-					// rectangle from overlapping the keyboard.
+
 					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								if hasActiveVideo {
+								if showMonitor {
 									return a.layoutVideoMonitor(gtx)
 								}
 								return layout.Dimensions{}
@@ -555,7 +565,7 @@ func (a *guiApp) layoutRoot(gtx layout.Context) layout.Dimensions {
 				)
 			}),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
-			// Thin horizontal separator above the footer.
+
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				h := gtx.Dp(unit.Dp(1))
 				sz := image.Pt(gtx.Constraints.Max.X, h)
@@ -564,7 +574,7 @@ func (a *guiApp) layoutRoot(gtx layout.Context) layout.Dimensions {
 				return layout.Dimensions{Size: sz}
 			}),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
-			// Footer: hint text for hovered toolbar icons
+
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return a.layoutFooter(gtx)
 			}),
@@ -572,14 +582,11 @@ func (a *guiApp) layoutRoot(gtx layout.Context) layout.Dimensions {
 	})
 }
 
-// layoutFooter renders a thin status strip at the bottom of the window that
-// displays the current hover hint (or a blank reserved line when nothing is
-// hovered). a.hint is updated each frame in layoutTopToolbar.
 func (a *guiApp) layoutFooter(gtx layout.Context) layout.Dimensions {
 	return layout.Inset{Left: unit.Dp(6), Right: unit.Dp(6), Top: unit.Dp(2), Bottom: unit.Dp(2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		text := a.hint
 		if text == "" {
-			text = " " // reserve the line height so the footer doesn't collapse
+			text = " "
 		}
 		lbl := material.Label(a.theme, unit.Sp(13), text)
 		lbl.Color = colorToggleOff
@@ -587,10 +594,6 @@ func (a *guiApp) layoutFooter(gtx layout.Context) layout.Dimensions {
 	})
 }
 
-// layoutGrayIcon renders a plain gray-tinted material icon with a fixed
-// square size. Used to show toolbar buttons in a disabled look when the
-// selected device is offline. No clickable wrapper — so hover tracking is
-// not available in this state.
 func layoutGrayIcon(gtx layout.Context, icon *widget.Icon, sizeDp unit.Dp) layout.Dimensions {
 	size := gtx.Dp(sizeDp)
 	gtx.Constraints = layout.Exact(image.Pt(size, size))
@@ -598,9 +601,6 @@ func layoutGrayIcon(gtx layout.Context, icon *widget.Icon, sizeDp unit.Dp) layou
 	return layout.Dimensions{Size: image.Pt(size, size)}
 }
 
-// layoutTopToolbar renders a single horizontal toolbar at the top of the window
-// that operates on the currently selected device. Handles click events for all
-// toolbar buttons (play/stop, pause, monitor toggles, reset, poweroff).
 func (a *guiApp) layoutTopToolbar(gtx layout.Context) layout.Dimensions {
 	if a.selectedIdx < 0 || a.selectedIdx >= len(a.devices) {
 		return layout.Dimensions{}
@@ -608,7 +608,6 @@ func (a *guiApp) layoutTopToolbar(gtx layout.Context) layout.Dimensions {
 	dev := &a.devices[a.selectedIdx]
 	enabled := dev.online
 
-	// Always drain click events so they don't queue up while disabled.
 	toggleClicked := dev.toggle.Clicked(gtx)
 	pauseClicked := dev.pauseBtn.Clicked(gtx)
 	resetClicked := dev.resetBtn.Clicked(gtx)
@@ -620,14 +619,10 @@ func (a *guiApp) layoutTopToolbar(gtx layout.Context) layout.Dimensions {
 	recClicked := dev.recBtn.Clicked(gtx)
 	castClicked := dev.castBtn.Clicked(gtx)
 
-	// The keyboard toggle is independent of device-online state — drain it
-	// up front and apply unconditionally. The window resize follows from
-	// syncWindowHeight, called once per frame in layoutRoot.
 	if a.keyboardBtn.Clicked(gtx) {
 		a.keyboardVisible = !a.keyboardVisible
 	}
 
-	// Update footer hint from current hover state.
 	a.hint = ""
 	switch {
 	case dev.toggle.Hovered():
@@ -727,9 +722,7 @@ func (a *guiApp) layoutTopToolbar(gtx layout.Context) layout.Dimensions {
 			commands.Reset()
 		}
 		if poweroffClicked {
-			// Stop any active streams/casts/recordings before powering off,
-			// then mark the device offline immediately so the toolbar disables
-			// without waiting for the next online-check tick.
+
 			if dev.casting {
 				a.stopCasting(dev)
 			}
@@ -756,9 +749,6 @@ func (a *guiApp) layoutTopToolbar(gtx layout.Context) layout.Dimensions {
 		}
 	}
 
-	// Re-read online state AFTER click handlers run, so a power-off click
-	// (which flips dev.online to false) immediately disables the render path
-	// below instead of waiting for the next frame.
 	enabled = dev.online
 
 	return layout.Stack{}.Layout(gtx,
@@ -880,30 +870,21 @@ func (a *guiApp) layoutTopToolbar(gtx layout.Context) layout.Dimensions {
 	)
 }
 
-// layoutDeviceCard renders a single device as a rounded card with:
-//   - Top: device label + online indicator
-//   - Bottom: waveform
-//
-// Button click handling for the toolbar now lives in layoutTopToolbar; the card
-// body is purely presentational plus the cardClick for selection (handled in
-// the pre-pass in layoutRoot).
 func (a *guiApp) layoutDeviceCard(gtx layout.Context, index int) layout.Dimensions {
 	dev := &a.devices[index]
 
 	selected := a.selectedIdx == index
 	borderCol := colorSeparator
 	if selected {
-		borderCol = colorInactive // white
+		borderCol = colorInactive
 	}
 
-	// Draw card background + border, then content on top (wrapped in cardClick)
 	return dev.cardClick.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Stack{}.Layout(gtx,
 			layout.Expanded(func(gtx layout.Context) layout.Dimensions {
 				sz := gtx.Constraints.Min
 				borderRadius := gtx.Dp(unit.Dp(8))
 				borderWidth := gtx.Dp(unit.Dp(3))
-				// Background fill
 
 				rr := clip.RRect{
 					Rect: image.Rect(0, 0, sz.X, sz.Y),
@@ -911,8 +892,6 @@ func (a *guiApp) layoutDeviceCard(gtx layout.Context, index int) layout.Dimensio
 				}
 				defer rr.Push(gtx.Ops).Pop()
 				paint.Fill(gtx.Ops, colorCardBg)
-
-				// Border stroke
 
 				strokeRR := clip.RRect{
 					Rect: image.Rect(0, 0, sz.X, sz.Y),
@@ -926,7 +905,7 @@ func (a *guiApp) layoutDeviceCard(gtx layout.Context, index int) layout.Dimensio
 			layout.Stacked(func(gtx layout.Context) layout.Dimensions {
 				return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-						// Row 1: device label (left) + online indicator (top-right corner)
+
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -1016,10 +995,8 @@ func (a *guiApp) layoutWaveform(gtx layout.Context, dev *deviceUI) layout.Dimens
 	halfH := float32(h) / 2
 	channelW := (w - gap) / 2
 
-	// Overall clip for the whole waveform area
 	defer clip.Rect{Max: sz}.Push(gtx.Ops).Pop()
 
-	// Two separate backgrounds (left + right) with a visible gap between them
 	func() {
 		defer clip.Rect{Max: image.Pt(channelW, h)}.Push(gtx.Ops).Pop()
 		paint.Fill(gtx.Ops, colorWaveformBg)
@@ -1034,14 +1011,13 @@ func (a *guiApp) layoutWaveform(gtx layout.Context, dev *deviceUI) layout.Dimens
 	a.mu.RUnlock()
 
 	if len(data) > 8 {
-		// Scale x so samples span the full channelW, regardless of sample count.
+
 		sampleCount := (len(data) - 6) / 4
 		if sampleCount < 1 {
 			sampleCount = 1
 		}
 		xStep := float32(channelW) / float32(sampleCount)
 
-		// Build left channel path first
 		var pathLeft clip.Path
 		pathLeft.Begin(gtx.Ops)
 		first := true
@@ -1066,7 +1042,6 @@ func (a *guiApp) layoutWaveform(gtx layout.Context, dev *deviceUI) layout.Dimens
 			paint.Fill(gtx.Ops, colorWaveformFg)
 		}()
 
-		// Build right channel path
 		var pathRight clip.Path
 		pathRight.Begin(gtx.Ops)
 		first = true
@@ -1097,27 +1072,91 @@ func (a *guiApp) layoutWaveform(gtx layout.Context, dev *deviceUI) layout.Dimens
 }
 
 func (a *guiApp) layoutVideoMonitor(gtx layout.Context) layout.Dimensions {
-	// Collect active video streams with their originating device index so we
-	// can highlight the selected device's monitor when multiple are shown.
-	a.mu.RLock()
-	var activeFrames []*image.NRGBA
-	var activeIdx []int
-	for i := range a.devices {
-		if a.devices[i].videoActive && a.devices[i].videoFrame != nil {
-			activeFrames = append(activeFrames, a.devices[i].videoFrame)
-			activeIdx = append(activeIdx, i)
+
+	const framePeriod = 20 * time.Millisecond
+	stats := &a.monStats
+
+	// The monitor follows the selected device: show its live stream, or the
+	// test pattern when that device isn't streaming (stopped or offline) —
+	// even if a different device is streaming in the background.
+	selIdx := a.selectedIdx
+	liveVideo := false
+	var showOp paint.ImageOp
+	a.mu.Lock()
+	if selIdx >= 0 && selIdx < len(a.devices) {
+		dev := &a.devices[selIdx]
+		confirmedOffline := !dev.online && !dev.lastChecked.IsZero()
+		if dev.videoActive {
+			if !gtx.Now.Before(dev.nextFrameDue) {
+				if len(dev.frameQueue) > 0 {
+					dev.shownFrame = dev.frameQueue[0]
+					dev.frameQueue = dev.frameQueue[1:]
+					if gtx.Now.Sub(dev.nextFrameDue) > 5*framePeriod {
+						dev.nextFrameDue = gtx.Now
+					}
+					dev.nextFrameDue = dev.nextFrameDue.Add(framePeriod)
+					stats.consumed++
+				} else {
+					stats.starved++
+				}
+			}
+
+			if n := len(dev.frameQueue); n > 2 {
+				dev.frameQueue = dev.frameQueue[n-2:]
+				stats.trimmed += n - 2
+			}
+			if dev.shownFrame.img != nil && !confirmedOffline {
+				showOp = dev.shownFrame.op
+				liveVideo = true
+			}
 		}
 	}
-	a.mu.RUnlock()
+	a.mu.Unlock()
 
-	count := len(activeFrames)
+	if !liveVideo {
+		showOp = a.testCard()
+	}
+	activeOps := []paint.ImageOp{showOp}
+	activeIdx := []int{selIdx}
+
+	if liveVideo {
+		gtx.Execute(op.InvalidateCmd{})
+	}
+
+	if liveVideo {
+		stats.events++
+		if !stats.lastEvent.IsZero() {
+			if gap := gtx.Now.Sub(stats.lastEvent); gap > stats.maxGap {
+				stats.maxGap = gap
+			}
+		}
+		stats.lastEvent = gtx.Now
+		if stats.lastReport.IsZero() {
+			stats.lastReport = gtx.Now
+		} else if gtx.Now.Sub(stats.lastReport) >= time.Second {
+			if debugLogEnabled() {
+				fmt.Printf("[monitor] ui=%d/s maxgap=%.1fms arrived=%d consumed=%d starved=%d trimmed=%d\n",
+					stats.events, float64(stats.maxGap.Microseconds())/1000.0,
+					stats.arrived.Swap(0), stats.consumed, stats.starved, stats.trimmed)
+			} else {
+				stats.arrived.Store(0)
+			}
+			stats.events, stats.consumed, stats.starved, stats.trimmed = 0, 0, 0, 0
+			stats.maxGap = 0
+			stats.lastReport = gtx.Now
+		}
+	} else {
+		stats.lastEvent = time.Time{}
+		stats.lastReport = time.Time{}
+	}
+
+	count := len(activeOps)
 	if count == 0 {
-		count = 1 // reserve space for at least one panel
+		count = 1
 	}
 
 	totalW := gtx.Constraints.Max.X
-	// Floor the monitor width to the keyboard's natural width so a single
-	// monitor never renders narrower than the keyboard sitting beneath it.
+
 	if a.keyboard != nil && a.keyboardVisible {
 		if minW := a.keyboard.MaxWidth(gtx); totalW < minW {
 			totalW = minW
@@ -1133,11 +1172,11 @@ func (a *guiApp) layoutVideoMonitor(gtx layout.Context) layout.Dimensions {
 	monitorOriginX := gtx.Dp(unit.Dp(10)) + gtx.Dp(unit.Dp(280)) + gtx.Dp(unit.Dp(10))
 	monitorOriginY := gtx.Dp(unit.Dp(10)) + a.toolbarHeightPx + gtx.Dp(unit.Dp(10))
 
-	hits := make([]dropHit, 0, len(activeFrames))
+	hits := make([]dropHit, 0, len(activeOps))
 
 	borderWidth := gtx.Dp(unit.Dp(3))
 	borderRadius := gtx.Dp(unit.Dp(8))
-	for i, frame := range activeFrames {
+	for i, imgOp := range activeOps {
 		absX := monitorOriginX + i*(cellW+gap)
 		absY := monitorOriginY
 		hits = append(hits, dropHit{
@@ -1148,7 +1187,7 @@ func (a *guiApp) layoutVideoMonitor(gtx layout.Context) layout.Dimensions {
 		stack := op.Offset(image.Pt(offsetX, 0)).Push(gtx.Ops)
 
 		borderCol := colorSeparator
-		if len(activeFrames) > 1 && activeIdx[i] == a.selectedIdx {
+		if len(activeOps) > 1 && activeIdx[i] == a.selectedIdx {
 			borderCol = colorInactive
 		}
 		rrect := clip.RRect{
@@ -1159,15 +1198,14 @@ func (a *guiApp) layoutVideoMonitor(gtx layout.Context) layout.Dimensions {
 		paint.Fill(gtx.Ops, borderCol)
 		borderStack.Pop()
 
-		// Clip image to rounded rect
 		clipStack := clip.RRect{
 			Rect: image.Rect(0, 0, cellW, cellH),
 			SE:   borderRadius, SW: borderRadius, NE: borderRadius, NW: borderRadius,
 		}.Push(gtx.Ops)
 
-		scaleX := float32(cellW) / float32(frame.Bounds().Dx())
-		scaleY := float32(cellH) / float32(frame.Bounds().Dy())
-		imgOp := paint.NewImageOp(frame)
+		fsz := imgOp.Size()
+		scaleX := float32(cellW) / float32(fsz.X)
+		scaleY := float32(cellH) / float32(fsz.Y)
 		imgOp.Add(gtx.Ops)
 		t := f32.Affine2D{}.Scale(f32.Pt(0, 0), f32.Pt(scaleX, scaleY))
 		op.Affine(t).Add(gtx.Ops)
@@ -1186,15 +1224,27 @@ func (a *guiApp) layoutVideoMonitor(gtx layout.Context) layout.Dimensions {
 
 const videoMonitorScale = 3
 
-// guiVideoRenderer implements streams.Renderer for the in-app video monitor:
-// it decodes raw paletted frames into a pre-scaled NRGBA buffer, applies the
-// optional CRT scanline effect, and forwards raw frames to the cast/rec pipe.
+type monitorFrame struct {
+	op  paint.ImageOp
+	img *image.RGBA
+}
+
+const monitorBufs = 5
+
 type guiVideoRenderer struct {
 	app         *guiApp
 	dev         *deviceUI
 	reusableImg *imaging.ReusablePalettedImage
 	lut         [16]color.NRGBA
-	nrgbaFrame  *image.NRGBA
+
+	nativeFrames [monitorBufs]*image.RGBA
+	scaledFrames [monitorBufs]*image.RGBA
+	backIdx      int
+
+	// CRT bloom scratch buffers (native-resolution RGB), lazily allocated.
+	glowSrc []byte // thresholded bright pixels
+	glowTmp []byte // separable-blur intermediate
+	glowBuf []byte // blurred glow added during compose
 }
 
 func newGuiVideoRenderer(a *guiApp, dev *deviceUI) *guiVideoRenderer {
@@ -1202,7 +1252,6 @@ func newGuiVideoRenderer(a *guiApp, dev *deviceUI) *guiVideoRenderer {
 		app:         a,
 		dev:         dev,
 		reusableImg: imaging.NewReusablePalettedImage(),
-		nrgbaFrame:  image.NewNRGBA(image.Rect(0, 0, imaging.WIDTH*videoMonitorScale, imaging.HEIGHT*videoMonitorScale)),
 	}
 	for i, c := range util.GetPalette() {
 		if i >= 16 {
@@ -1225,12 +1274,7 @@ func (r *guiVideoRenderer) Render(data []byte) bool {
 	}
 
 	palImg := r.reusableImg.Decode(data)
-	srcStride := palImg.Stride
-	srcPix := palImg.Pix
-	dstStride := r.nrgbaFrame.Stride
-	dstPix := r.nrgbaFrame.Pix
 
-	// Only show local scanlines in single-display mode (one device active)
 	activeCount := 0
 	r.app.mu.RLock()
 	for i := range r.app.devices {
@@ -1241,45 +1285,27 @@ func (r *guiVideoRenderer) Render(data []byte) bool {
 	r.app.mu.RUnlock()
 	crtOn := r.dev.crtOn && activeCount == 1
 
-	const scale = videoMonitorScale
-	var factors [scale]uint16
+	r.backIdx = (r.backIdx + 1) % monitorBufs
+	var frame *image.RGBA
 	if crtOn {
-		const minBright = 0.45
-		pixelH := float32(scale)
-		for i := range scale {
-			fracY := float32(i) / pixelH
-			bell := float32(math.Sin(float64(fracY) * math.Pi))
-			f := minBright + (1.0-minBright)*bell
-			factors[i] = uint16(f * 255)
-		}
+		frame = r.renderScaled(palImg)
 	} else {
-		for i := range scale {
-			factors[i] = 255
-		}
-	}
-	for y := range imaging.HEIGHT {
-		srcRow := y * srcStride
-		for sy := range scale {
-			dstRow := (y*scale + sy) * dstStride
-			f := factors[sy]
-			for x := range imaging.WIDTH {
-				c := r.lut[srcPix[srcRow+x]&0x0F]
-				rr := byte(uint16(c.R) * f / 255)
-				g := byte(uint16(c.G) * f / 255)
-				b := byte(uint16(c.B) * f / 255)
-				for sx := range scale {
-					off := dstRow + (x*scale+sx)*4
-					dstPix[off] = rr
-					dstPix[off+1] = g
-					dstPix[off+2] = b
-					dstPix[off+3] = c.A
-				}
-			}
-		}
+		frame = r.renderNative(palImg)
 	}
 
+	imgOp := paint.NewImageOp(frame)
+	if !crtOn {
+
+		imgOp.Filter = paint.FilterNearest
+	}
+
+	r.app.monStats.arrived.Add(1)
 	r.app.mu.Lock()
-	r.dev.videoFrame = r.nrgbaFrame
+	q := append(r.dev.frameQueue, monitorFrame{op: imgOp, img: frame})
+	if len(q) > 3 {
+		q = q[len(q)-3:]
+	}
+	r.dev.frameQueue = q
 	r.app.mu.Unlock()
 	r.app.window.Invalidate()
 
@@ -1293,6 +1319,172 @@ func (r *guiVideoRenderer) Render(data []byte) bool {
 	}
 
 	return true
+}
+
+func (r *guiVideoRenderer) renderNative(palImg *image.Paletted) *image.RGBA {
+	frame := r.nativeFrames[r.backIdx]
+	if frame == nil {
+		frame = image.NewRGBA(image.Rect(0, 0, imaging.WIDTH, imaging.HEIGHT))
+		r.nativeFrames[r.backIdx] = frame
+	}
+	srcPix := palImg.Pix
+	srcStride := palImg.Stride
+	dstPix := frame.Pix
+	dstStride := frame.Stride
+	for y := range imaging.HEIGHT {
+		srcRow := y * srcStride
+		dstRow := y * dstStride
+		for x := range imaging.WIDTH {
+			c := r.lut[srcPix[srcRow+x]&0x0F]
+			off := dstRow + x*4
+			dstPix[off] = c.R
+			dstPix[off+1] = c.G
+			dstPix[off+2] = c.B
+			dstPix[off+3] = c.A
+		}
+	}
+	return frame
+}
+
+// CRT bloom tuning.
+const (
+	glowThresh    = 40 // luminance above which a pixel contributes to the glow
+	glowRadius    = 1  // native-resolution box-blur radius
+	glowIntensity = 90 // additive glow strength, out of 256
+)
+
+func (r *guiVideoRenderer) renderScaled(palImg *image.Paletted) *image.RGBA {
+	const scale = videoMonitorScale
+	const w, h = imaging.WIDTH, imaging.HEIGHT
+	frame := r.scaledFrames[r.backIdx]
+	if frame == nil {
+		frame = image.NewRGBA(image.Rect(0, 0, w*scale, h*scale))
+		r.scaledFrames[r.backIdx] = frame
+	}
+
+	var factors [scale]uint16
+	const minBright = 0.45
+	pixelH := float32(scale)
+	for i := range scale {
+		fracY := float32(i) / pixelH
+		bell := float32(math.Sin(float64(fracY) * math.Pi))
+		f := minBright + (1.0-minBright)*bell
+		factors[i] = uint16(f * 255)
+	}
+
+	srcPix := palImg.Pix
+	srcStride := palImg.Stride
+
+	// Build a thresholded "bright pixels" buffer at native resolution and blur
+	// it; bright areas (text/graphics) then bleed a soft halo into the dark
+	// scanline gaps, the classic CRT phosphor glow.
+	if r.glowSrc == nil {
+		r.glowSrc = make([]byte, w*h*3)
+		r.glowTmp = make([]byte, w*h*3)
+		r.glowBuf = make([]byte, w*h*3)
+	}
+	const span = 255 - glowThresh
+	for y := range h {
+		srcRow := y * srcStride
+		for x := range w {
+			c := r.lut[srcPix[srcRow+x]&0x0F]
+			lum := (int(c.R)*54 + int(c.G)*183 + int(c.B)*19) >> 8
+			o := (y*w + x) * 3
+			if lum > glowThresh {
+				wgt := lum - glowThresh // 0..span
+				r.glowSrc[o] = byte(int(c.R) * wgt / span)
+				r.glowSrc[o+1] = byte(int(c.G) * wgt / span)
+				r.glowSrc[o+2] = byte(int(c.B) * wgt / span)
+			} else {
+				r.glowSrc[o], r.glowSrc[o+1], r.glowSrc[o+2] = 0, 0, 0
+			}
+		}
+	}
+	boxBlurRGB(r.glowSrc, r.glowTmp, r.glowBuf, w, h, glowRadius)
+
+	dstPix := frame.Pix
+	dstStride := frame.Stride
+	for y := range h {
+		srcRow := y * srcStride
+		glowRow := y * w * 3
+		for sy := range scale {
+			dstRow := (y*scale + sy) * dstStride
+			f := factors[sy]
+			for x := range w {
+				c := r.lut[srcPix[srcRow+x]&0x0F]
+				gi := glowRow + x*3
+				rr := clamp8(int(uint16(c.R)*f/255) + int(r.glowBuf[gi])*glowIntensity>>8)
+				g := clamp8(int(uint16(c.G)*f/255) + int(r.glowBuf[gi+1])*glowIntensity>>8)
+				b := clamp8(int(uint16(c.B)*f/255) + int(r.glowBuf[gi+2])*glowIntensity>>8)
+				for sx := range scale {
+					off := dstRow + (x*scale+sx)*4
+					dstPix[off] = rr
+					dstPix[off+1] = g
+					dstPix[off+2] = b
+					dstPix[off+3] = c.A
+				}
+			}
+		}
+	}
+	return frame
+}
+
+func clamp8(v int) byte {
+	if v > 255 {
+		return 255
+	}
+	return byte(v)
+}
+
+// boxBlurRGB runs a separable box blur of the given radius over an RGB buffer,
+// using tmp as the horizontal-pass scratch and writing the result to dst.
+func boxBlurRGB(src, tmp, dst []byte, w, h, radius int) {
+	div := 2*radius + 1
+	// Horizontal pass: src -> tmp
+	for y := range h {
+		row := y * w * 3
+		for x := range w {
+			var sr, sg, sb int
+			for k := -radius; k <= radius; k++ {
+				xx := x + k
+				if xx < 0 {
+					xx = 0
+				} else if xx >= w {
+					xx = w - 1
+				}
+				o := row + xx*3
+				sr += int(src[o])
+				sg += int(src[o+1])
+				sb += int(src[o+2])
+			}
+			o := row + x*3
+			tmp[o] = byte(sr / div)
+			tmp[o+1] = byte(sg / div)
+			tmp[o+2] = byte(sb / div)
+		}
+	}
+	// Vertical pass: tmp -> dst
+	for y := range h {
+		for x := range w {
+			var sr, sg, sb int
+			for k := -radius; k <= radius; k++ {
+				yy := y + k
+				if yy < 0 {
+					yy = 0
+				} else if yy >= h {
+					yy = h - 1
+				}
+				o := (yy*w + x) * 3
+				sr += int(tmp[o])
+				sg += int(tmp[o+1])
+				sb += int(tmp[o+2])
+			}
+			o := (y*w + x) * 3
+			dst[o] = byte(sr / div)
+			dst[o+1] = byte(sg / div)
+			dst[o+2] = byte(sb / div)
+		}
+	}
 }
 
 func (a *guiApp) startVideo(dev *deviceUI) {
@@ -1316,7 +1508,8 @@ func (a *guiApp) stopVideo(dev *deviceUI) {
 	dev.videoActive = false
 	streams.VideoStop(dev.device)
 	a.mu.Lock()
-	dev.videoFrame = nil
+	dev.frameQueue = nil
+	dev.shownFrame = monitorFrame{}
 	a.mu.Unlock()
 }
 
@@ -1325,9 +1518,9 @@ func (a *guiApp) layoutSnapshotButton(gtx layout.Context, dev *deviceUI) layout.
 	gtx.Constraints = layout.Exact(image.Pt(size, size))
 
 	if dev.snapBtn.Clicked(gtx) && dev.active {
-		// Save current video frame as screenshot
+
 		a.mu.RLock()
-		frame := dev.videoFrame
+		frame := dev.shownFrame.img
 		a.mu.RUnlock()
 		if frame != nil {
 			go func() {
@@ -1441,8 +1634,6 @@ func (a *guiApp) startRecording(dev *deviceUI) {
 	fmt.Printf("Recording started: %s (mode: %s)\n", recordPath, recordMode)
 }
 
-// ensureRawFrameCh creates the raw frame channel and consumer goroutine
-// if not already running. Used by both cast and recording.
 func (a *guiApp) ensureRawFrameCh(dev *deviceUI) {
 	if dev.rawFrameCh != nil {
 		return
@@ -1540,22 +1731,33 @@ func (a *guiApp) startAudioReader(dev *deviceUI) {
 	}
 	dev.audioPlaying = true
 	dev.audioStopCh = make(chan struct{})
+	var lastWaveform time.Time
 	audioReader := streams.AudioReader{
 		Device:       dev.device,
 		AudioContext: a.otoCtx,
 		StopChan:     dev.audioStopCh,
 		Renderer: func(data []byte) {
-			a.mu.Lock()
-			dev.waveform = data
-			// Feed audio to recorder/caster if active
-			if dev.recording && dev.recRenderer != nil {
-				dev.recRenderer.WriteAudio(data)
+
+			a.mu.RLock()
+			rec := dev.recRenderer
+			cast := dev.castRenderer
+			a.mu.RUnlock()
+			if rec != nil {
+				rec.WriteAudio(data)
 			}
-			if dev.casting && dev.castRenderer != nil {
-				dev.castRenderer.WriteAudio(data)
+			if cast != nil {
+				cast.WriteAudio(data)
 			}
-			a.mu.Unlock()
-			a.window.Invalidate()
+
+			if time.Since(lastWaveform) >= 33*time.Millisecond {
+				lastWaveform = time.Now()
+				wf := make([]byte, len(data))
+				copy(wf, data)
+				a.mu.Lock()
+				dev.waveform = wf
+				a.mu.Unlock()
+				a.window.Invalidate()
+			}
 		},
 	}
 	go audioReader.Read()
