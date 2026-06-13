@@ -42,12 +42,33 @@ func writeFrames(frames ...[]byte) {
 	network.SendTcpData(buf, "10.100.200.230")
 }
 
+func reassertReverse(codes []byte, state int) []byte {
+	if state&optReverse == 0 {
+		return codes
+	}
+	out := make([]byte, 0, len(codes)+2)
+	for _, c := range codes {
+		out = append(out, c)
+		if c == 13 {
+			out = append(out, 18)
+		}
+	}
+	return out
+}
+
 func KeyboardListener(kb *VirtualKeyboard) func(KeyEvent) {
 	return func(ev KeyEvent) {
 		k := ev.Key
 		state := kb.OptionState()
 		code := ev.Code
 		fmt.Printf("vkb: %s/%q -> code=%d state=0x%02x\n", k.Type, k.Text, code, state)
+
+		if k.Type == "OPTION" {
+			if code >= 0 {
+				sendKeystrokes([]byte{byte(code & 0xff)})
+			}
+			return
+		}
 
 		if k.Type == "KEY" || k.Type == "FUNCTION" ||
 			(k.Type == "COLOR" && state < optFrameColor) {
@@ -79,7 +100,7 @@ func KeyboardListener(kb *VirtualKeyboard) func(KeyEvent) {
 				}
 				codes = []byte{byte(code & 0xff)}
 			}
-			sendKeystrokes(codes)
+			sendKeystrokes(reassertReverse(codes, state))
 			return
 		}
 

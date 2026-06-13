@@ -54,16 +54,17 @@ const (
 const C64ProTypeface font.Typeface = "C64Pro"
 
 type Key struct {
-	ID             int        `json:"id"`
-	Type           string     `json:"type"`
-	Name           string     `json:"name"`
-	Text           string     `json:"text"`
-	Symbol         bool       `json:"symbol"`
-	ToggleButton   bool       `json:"toggleButton"`
-	Size           float64    `json:"size"`
-	Index          int        `json:"index"`
-	CodeOptions    []*string  `json:"codeOptions"`
-	DisplayOptions [][]string `json:"displayOptions"`
+	ID               int        `json:"id"`
+	Type             string     `json:"type"`
+	Name             string     `json:"name"`
+	Text             string     `json:"text"`
+	Symbol           bool       `json:"symbol"`
+	HasGraphicSymbol bool       `json:"hasGraphicSymbol"`
+	ToggleButton     bool       `json:"toggleButton"`
+	Size             float64    `json:"size"`
+	Index            int        `json:"index"`
+	CodeOptions      []*string  `json:"codeOptions"`
+	DisplayOptions   [][]string `json:"displayOptions"`
 }
 
 type KeyRow struct {
@@ -388,6 +389,21 @@ func (k *Key) resolveCode(state int) int {
 	return v
 }
 
+func (k *Key) resolveToggleCode(on bool) int {
+	idx := 0
+	if on {
+		idx = 1
+	}
+	if idx >= len(k.CodeOptions) || k.CodeOptions[idx] == nil {
+		return -1
+	}
+	v, err := strconv.Atoi(strings.TrimSpace(*k.CodeOptions[idx]))
+	if err != nil {
+		return -1
+	}
+	return v
+}
+
 var iconByKeyName = func() map[string]*widget.Icon {
 	m := map[string]*widget.Icon{}
 	for name, data := range map[string][]byte{
@@ -465,23 +481,9 @@ func (vk *VirtualKeyboard) Layout(th *material.Theme, gtx layout.Context) layout
 		paint.Fill(recGtx.Ops, kbBg)
 		clipArea.Pop()
 
-		unitWf := float64(unitW)
-		for r, row := range vk.rows {
-			yTop := r * rowH
-
-			var xF float64
-			for _, c := range row {
-				x0 := int(xF)
-				xF += c.key.Size * unitWf
-				x1 := int(xF)
-				w := x1 - x0
-				if w <= 0 {
-					continue
-				}
-				rect := image.Rect(x0+gap/2, yTop+gap/2, x1-gap/2, yTop+rowH-gap/2)
-				vk.drawCell(th, recGtx, c, rect)
-			}
-		}
+		vk.eachCell(rowH, unitW, gap, func(c *keyCell, rect image.Rectangle) {
+			vk.drawCell(th, recGtx, c, rect)
+		})
 
 		vk.cacheCall = rec.Stop()
 		vk.cacheValid = true
@@ -490,7 +492,84 @@ func (vk *VirtualKeyboard) Layout(th *material.Theme, gtx layout.Context) layout
 	}
 	vk.cacheCall.Add(gtx.Ops)
 
+	// Hover highlight is drawn outside the cached macro: it changes per pointer
+	// move, independent of optionState/metrics, so it must not be baked in.
+	vk.eachCell(rowH, unitW, gap, func(c *keyCell, rect image.Rectangle) {
+		if c.key.Type == "FILLER" || !vk.cellHovered(c) {
+			return
+		}
+		radius := gtx.Dp(unit.Dp(4))
+		off := op.Offset(rect.Min).Push(gtx.Ops)
+		rr := clip.RRect{
+			Rect: image.Rect(0, 0, rect.Dx(), rect.Dy()),
+			SE:   radius, SW: radius, NE: radius, NW: radius,
+		}
+		strokeStack := clip.Stroke{Path: rr.Path(gtx.Ops), Width: 1}.Op().Push(gtx.Ops)
+		paint.Fill(gtx.Ops, keyTextColor(c))
+		strokeStack.Pop()
+		off.Pop()
+	})
+
 	return layout.Dimensions{Size: image.Pt(totalW, rowH*len(vk.rows))}
+}
+
+// eachCell walks every cell with its on-screen rectangle, applying the same
+// float-accumulated geometry the draw pass uses so hover overlays and cached
+// visuals stay pixel-aligned.
+func (vk *VirtualKeyboard) eachCell(rowH, unitW, gap int, fn func(c *keyCell, rect image.Rectangle)) {
+	unitWf := float64(unitW)
+	for r, row := range vk.rows {
+		yTop := r * rowH
+		var xF float64
+		for _, c := range row {
+			x0 := int(xF)
+			xF += c.key.Size * unitWf
+			x1 := int(xF)
+			w := x1 - x0
+			if w <= 0 {
+				continue
+			}
+			rect := image.Rect(x0+gap/2, yTop+gap/2, x1-gap/2, yTop+rowH-gap/2)
+			fn(c, rect)
+		}
+	}
+}
+
+// keyTextColor returns the color the cell's label/glyph is drawn in. Used for
+// both the label and the rectangular borders so they always share one color.
+// darken returns a slightly darker shade of c (~82% brightness), preserving alpha.
+func darken(c color.NRGBA) color.NRGBA {
+	const f = 210 // out of 256
+	return color.NRGBA{
+		R: byte(int(c.R) * f >> 8),
+		G: byte(int(c.G) * f >> 8),
+		B: byte(int(c.B) * f >> 8),
+		A: c.A,
+	}
+}
+
+func keyTextColor(c *keyCell) color.NRGBA {
+	switch c.key.Type {
+	case "OPTION":
+		if c.toggle.Value {
+			return kbTextOnLight
+		}
+	case "COLOR":
+		if luminance(paletteColor(c.key.Index)) > 140 {
+			return kbTextOnLight
+		}
+	}
+	return kbText
+}
+
+// cellHovered reports whether the pointer is over the cell. OPTION cells use a
+// widget.Bool, the rest a widget.Clickable; both track hover via the per-frame
+// Update calls in processInput.
+func (vk *VirtualKeyboard) cellHovered(c *keyCell) bool {
+	if c.key.Type == "OPTION" {
+		return c.toggle.Hovered()
+	}
+	return c.click.Hovered()
 }
 
 func (vk *VirtualKeyboard) processInput(gtx layout.Context) {
@@ -512,12 +591,13 @@ func (vk *VirtualKeyboard) processInput(gtx layout.Context) {
 		}
 	}
 	if newState != vk.optionState {
+		changed := newState ^ vk.optionState
 		vk.optionState = newState
 
 		for _, row := range vk.rows {
 			for _, c := range row {
-				if c.key.Type == "OPTION" && c.toggle.Value {
-					vk.fire(KeyEvent{Key: c.key, Code: c.key.resolveCode(vk.optionState)})
+				if c.key.Type == "OPTION" && c.key.Index&changed != 0 {
+					vk.fire(KeyEvent{Key: c.key, Code: c.key.resolveToggleCode(c.toggle.Value)})
 				}
 			}
 		}
@@ -530,7 +610,6 @@ func (vk *VirtualKeyboard) drawCell(th *material.Theme, gtx layout.Context, c *k
 	}
 
 	bg := kbKeyBg
-	textCol := kbText
 	switch c.key.Type {
 	case "FUNCTION":
 		bg = kbFunctionBg
@@ -538,17 +617,11 @@ func (vk *VirtualKeyboard) drawCell(th *material.Theme, gtx layout.Context, c *k
 		bg = kbOptionBg
 		if c.toggle.Value {
 			bg = kbOptionOn
-			textCol = kbTextOnLight
 		}
 	case "COLOR":
 		bg = paletteColor(c.key.Index)
-
-		if luminance(bg) > 140 {
-			textCol = kbTextOnLight
-		} else {
-			textCol = kbText
-		}
 	}
+	textCol := keyTextColor(c)
 
 	radius := gtx.Dp(unit.Dp(4))
 	rrSize := image.Pt(rect.Dx(), rect.Dy())
@@ -570,6 +643,17 @@ func (vk *VirtualKeyboard) drawCell(th *material.Theme, gtx layout.Context, c *k
 		strokeStack := clip.Stroke{Path: strokeRR.Path(gtx.Ops), Width: 1}.Op().Push(gtx.Ops)
 		paint.Fill(gtx.Ops, kbBorder)
 		strokeStack.Pop()
+	}
+
+	// While a glyph-altering modifier is latched (shift / reverse / commodore),
+	// fill a narrow rectangle behind the glyph slightly darker than the base key
+	// color, as a cue that an alternate glyph is active. KEY cells only.
+	if c.key.Type == "KEY" && vk.optionState&(optShift|optReverse|optCommodore) != 0 {
+		padX := gtx.Dp(unit.Dp(3))
+		padY := gtx.Dp(unit.Dp(3))
+		plate := clip.Rect(image.Rect(padX, padY, rrSize.X-padX, rrSize.Y-padY)).Push(gtx.Ops)
+		paint.Fill(gtx.Ops, darken(bg))
+		plate.Pop()
 	}
 
 	cellGtx := gtx

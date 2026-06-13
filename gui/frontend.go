@@ -64,6 +64,50 @@ type guiApp struct {
 	linuxFixedSize bool
 
 	monStats monitorStats
+
+	testCardOp    paint.ImageOp
+	testCardReady bool
+}
+
+// monitorShown reports whether the video monitor area should be laid out. The
+// monitor follows the selected device and is always present when one is
+// selected: it shows that device's live stream, or the test pattern when the
+// device isn't streaming (stopped or offline).
+func (a *guiApp) monitorShown() bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.selectedIdx >= 0 && a.selectedIdx < len(a.devices)
+}
+
+func (a *guiApp) testCard() paint.ImageOp {
+	if !a.testCardReady {
+		a.testCardOp = paint.NewImageOp(makeTestCard())
+		a.testCardOp.Filter = paint.FilterNearest
+		a.testCardReady = true
+	}
+	return a.testCardOp
+}
+
+func makeTestCard() *image.RGBA {
+	const w, h = imaging.WIDTH, imaging.HEIGHT
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	bars := []color.RGBA{
+		{200, 200, 200, 255},
+		{200, 200, 0, 255},
+		{0, 200, 200, 255},
+		{0, 200, 0, 255},
+		{200, 0, 200, 255},
+		{200, 0, 0, 255},
+		{0, 0, 200, 255},
+	}
+	n := len(bars)
+	for x := 0; x < w; x++ {
+		c := bars[x*n/w]
+		for y := 0; y < h; y++ {
+			img.SetRGBA(x, y, c)
+		}
+	}
+	return img
 }
 
 type monitorStats struct {
@@ -422,14 +466,7 @@ func (a *guiApp) syncWindowSize() {
 	if a.linuxFixedSize {
 		return
 	}
-	hasActiveVideo := false
-	for i := range a.devices {
-		if a.devices[i].videoActive {
-			hasActiveVideo = true
-			break
-		}
-	}
-	w, h := computeTargetSize(a.keyboard, hasActiveVideo, a.keyboardVisible)
+	w, h := computeTargetSize(a.keyboard, a.monitorShown(), a.keyboardVisible)
 	if w == a.lastWindowW && h == a.lastWindowH {
 		return
 	}
@@ -482,13 +519,7 @@ func (a *guiApp) layoutRoot(gtx layout.Context) layout.Dimensions {
 			layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
 
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				hasActiveVideo := false
-				for i := range a.devices {
-					if a.devices[i].videoActive {
-						hasActiveVideo = true
-						break
-					}
-				}
+				showMonitor := a.monitorShown()
 
 				return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceEnd}.Layout(gtx,
 
@@ -516,7 +547,7 @@ func (a *guiApp) layoutRoot(gtx layout.Context) layout.Dimensions {
 					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								if hasActiveVideo {
+								if showMonitor {
 									return a.layoutVideoMonitor(gtx)
 								}
 								return layout.Dimensions{}
@@ -1043,48 +1074,56 @@ func (a *guiApp) layoutWaveform(gtx layout.Context, dev *deviceUI) layout.Dimens
 func (a *guiApp) layoutVideoMonitor(gtx layout.Context) layout.Dimensions {
 
 	const framePeriod = 20 * time.Millisecond
-	var activeOps []paint.ImageOp
-	var activeIdx []int
-	anyVideo := false
 	stats := &a.monStats
+
+	// The monitor follows the selected device: show its live stream, or the
+	// test pattern when that device isn't streaming (stopped or offline) —
+	// even if a different device is streaming in the background.
+	selIdx := a.selectedIdx
+	liveVideo := false
+	var showOp paint.ImageOp
 	a.mu.Lock()
-	for i := range a.devices {
-		dev := &a.devices[i]
-		if !dev.videoActive {
-			continue
-		}
-		anyVideo = true
-
-		if !gtx.Now.Before(dev.nextFrameDue) {
-			if len(dev.frameQueue) > 0 {
-				dev.shownFrame = dev.frameQueue[0]
-				dev.frameQueue = dev.frameQueue[1:]
-				if gtx.Now.Sub(dev.nextFrameDue) > 5*framePeriod {
-					dev.nextFrameDue = gtx.Now
+	if selIdx >= 0 && selIdx < len(a.devices) {
+		dev := &a.devices[selIdx]
+		confirmedOffline := !dev.online && !dev.lastChecked.IsZero()
+		if dev.videoActive {
+			if !gtx.Now.Before(dev.nextFrameDue) {
+				if len(dev.frameQueue) > 0 {
+					dev.shownFrame = dev.frameQueue[0]
+					dev.frameQueue = dev.frameQueue[1:]
+					if gtx.Now.Sub(dev.nextFrameDue) > 5*framePeriod {
+						dev.nextFrameDue = gtx.Now
+					}
+					dev.nextFrameDue = dev.nextFrameDue.Add(framePeriod)
+					stats.consumed++
+				} else {
+					stats.starved++
 				}
-				dev.nextFrameDue = dev.nextFrameDue.Add(framePeriod)
-				stats.consumed++
-			} else {
-				stats.starved++
 			}
-		}
 
-		if n := len(dev.frameQueue); n > 2 {
-			dev.frameQueue = dev.frameQueue[n-2:]
-			stats.trimmed += n - 2
-		}
-		if dev.shownFrame.img != nil {
-			activeOps = append(activeOps, dev.shownFrame.op)
-			activeIdx = append(activeIdx, i)
+			if n := len(dev.frameQueue); n > 2 {
+				dev.frameQueue = dev.frameQueue[n-2:]
+				stats.trimmed += n - 2
+			}
+			if dev.shownFrame.img != nil && !confirmedOffline {
+				showOp = dev.shownFrame.op
+				liveVideo = true
+			}
 		}
 	}
 	a.mu.Unlock()
 
-	if anyVideo {
+	if !liveVideo {
+		showOp = a.testCard()
+	}
+	activeOps := []paint.ImageOp{showOp}
+	activeIdx := []int{selIdx}
+
+	if liveVideo {
 		gtx.Execute(op.InvalidateCmd{})
 	}
 
-	if anyVideo {
+	if liveVideo {
 		stats.events++
 		if !stats.lastEvent.IsZero() {
 			if gap := gtx.Now.Sub(stats.lastEvent); gap > stats.maxGap {
@@ -1201,6 +1240,11 @@ type guiVideoRenderer struct {
 	nativeFrames [monitorBufs]*image.RGBA
 	scaledFrames [monitorBufs]*image.RGBA
 	backIdx      int
+
+	// CRT bloom scratch buffers (native-resolution RGB), lazily allocated.
+	glowSrc []byte // thresholded bright pixels
+	glowTmp []byte // separable-blur intermediate
+	glowBuf []byte // blurred glow added during compose
 }
 
 func newGuiVideoRenderer(a *guiApp, dev *deviceUI) *guiVideoRenderer {
@@ -1302,11 +1346,19 @@ func (r *guiVideoRenderer) renderNative(palImg *image.Paletted) *image.RGBA {
 	return frame
 }
 
+// CRT bloom tuning.
+const (
+	glowThresh    = 40 // luminance above which a pixel contributes to the glow
+	glowRadius    = 1  // native-resolution box-blur radius
+	glowIntensity = 90 // additive glow strength, out of 256
+)
+
 func (r *guiVideoRenderer) renderScaled(palImg *image.Paletted) *image.RGBA {
 	const scale = videoMonitorScale
+	const w, h = imaging.WIDTH, imaging.HEIGHT
 	frame := r.scaledFrames[r.backIdx]
 	if frame == nil {
-		frame = image.NewRGBA(image.Rect(0, 0, imaging.WIDTH*scale, imaging.HEIGHT*scale))
+		frame = image.NewRGBA(image.Rect(0, 0, w*scale, h*scale))
 		r.scaledFrames[r.backIdx] = frame
 	}
 
@@ -1322,18 +1374,48 @@ func (r *guiVideoRenderer) renderScaled(palImg *image.Paletted) *image.RGBA {
 
 	srcPix := palImg.Pix
 	srcStride := palImg.Stride
+
+	// Build a thresholded "bright pixels" buffer at native resolution and blur
+	// it; bright areas (text/graphics) then bleed a soft halo into the dark
+	// scanline gaps, the classic CRT phosphor glow.
+	if r.glowSrc == nil {
+		r.glowSrc = make([]byte, w*h*3)
+		r.glowTmp = make([]byte, w*h*3)
+		r.glowBuf = make([]byte, w*h*3)
+	}
+	const span = 255 - glowThresh
+	for y := range h {
+		srcRow := y * srcStride
+		for x := range w {
+			c := r.lut[srcPix[srcRow+x]&0x0F]
+			lum := (int(c.R)*54 + int(c.G)*183 + int(c.B)*19) >> 8
+			o := (y*w + x) * 3
+			if lum > glowThresh {
+				wgt := lum - glowThresh // 0..span
+				r.glowSrc[o] = byte(int(c.R) * wgt / span)
+				r.glowSrc[o+1] = byte(int(c.G) * wgt / span)
+				r.glowSrc[o+2] = byte(int(c.B) * wgt / span)
+			} else {
+				r.glowSrc[o], r.glowSrc[o+1], r.glowSrc[o+2] = 0, 0, 0
+			}
+		}
+	}
+	boxBlurRGB(r.glowSrc, r.glowTmp, r.glowBuf, w, h, glowRadius)
+
 	dstPix := frame.Pix
 	dstStride := frame.Stride
-	for y := range imaging.HEIGHT {
+	for y := range h {
 		srcRow := y * srcStride
+		glowRow := y * w * 3
 		for sy := range scale {
 			dstRow := (y*scale + sy) * dstStride
 			f := factors[sy]
-			for x := range imaging.WIDTH {
+			for x := range w {
 				c := r.lut[srcPix[srcRow+x]&0x0F]
-				rr := byte(uint16(c.R) * f / 255)
-				g := byte(uint16(c.G) * f / 255)
-				b := byte(uint16(c.B) * f / 255)
+				gi := glowRow + x*3
+				rr := clamp8(int(uint16(c.R)*f/255) + int(r.glowBuf[gi])*glowIntensity>>8)
+				g := clamp8(int(uint16(c.G)*f/255) + int(r.glowBuf[gi+1])*glowIntensity>>8)
+				b := clamp8(int(uint16(c.B)*f/255) + int(r.glowBuf[gi+2])*glowIntensity>>8)
 				for sx := range scale {
 					off := dstRow + (x*scale+sx)*4
 					dstPix[off] = rr
@@ -1345,6 +1427,64 @@ func (r *guiVideoRenderer) renderScaled(palImg *image.Paletted) *image.RGBA {
 		}
 	}
 	return frame
+}
+
+func clamp8(v int) byte {
+	if v > 255 {
+		return 255
+	}
+	return byte(v)
+}
+
+// boxBlurRGB runs a separable box blur of the given radius over an RGB buffer,
+// using tmp as the horizontal-pass scratch and writing the result to dst.
+func boxBlurRGB(src, tmp, dst []byte, w, h, radius int) {
+	div := 2*radius + 1
+	// Horizontal pass: src -> tmp
+	for y := range h {
+		row := y * w * 3
+		for x := range w {
+			var sr, sg, sb int
+			for k := -radius; k <= radius; k++ {
+				xx := x + k
+				if xx < 0 {
+					xx = 0
+				} else if xx >= w {
+					xx = w - 1
+				}
+				o := row + xx*3
+				sr += int(src[o])
+				sg += int(src[o+1])
+				sb += int(src[o+2])
+			}
+			o := row + x*3
+			tmp[o] = byte(sr / div)
+			tmp[o+1] = byte(sg / div)
+			tmp[o+2] = byte(sb / div)
+		}
+	}
+	// Vertical pass: tmp -> dst
+	for y := range h {
+		for x := range w {
+			var sr, sg, sb int
+			for k := -radius; k <= radius; k++ {
+				yy := y + k
+				if yy < 0 {
+					yy = 0
+				} else if yy >= h {
+					yy = h - 1
+				}
+				o := (yy*w + x) * 3
+				sr += int(tmp[o])
+				sg += int(tmp[o+1])
+				sb += int(tmp[o+2])
+			}
+			o := (y*w + x) * 3
+			dst[o] = byte(sr / div)
+			dst[o+1] = byte(sg / div)
+			dst[o+2] = byte(sb / div)
+		}
+	}
 }
 
 func (a *guiApp) startVideo(dev *deviceUI) {
