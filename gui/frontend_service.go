@@ -9,16 +9,16 @@ import (
 	"drazil.de/go64u/util"
 )
 
-func SendKeyboardSequence(command uint16, sequence []byte) {
+func SendKeyboardSequence(target string, command uint16, sequence []byte) {
 	payload := make([]byte, len(sequence)+4)
 	copy(payload[:], util.GetWordArray(command))
 	copy(payload[2:], util.GetWordArray(uint16(len(sequence))))
 	copy(payload[4:], sequence[:])
-	network.SendTcpData(payload, "10.100.200.230")
+	network.SendTcpData(payload, target)
 }
 
-func sendKeystrokes(codes []byte) {
-	SendKeyboardSequence(0xff03, codes)
+func sendKeystrokes(target string, codes []byte) {
+	SendKeyboardSequence(target, 0xff03, codes)
 }
 
 func buildPoke(addr uint16, data byte) []byte {
@@ -30,7 +30,7 @@ func buildPoke(addr uint16, data byte) []byte {
 	return frame
 }
 
-func writeFrames(frames ...[]byte) {
+func writeFrames(target string, frames ...[]byte) {
 	total := 0
 	for _, f := range frames {
 		total += len(f)
@@ -39,7 +39,7 @@ func writeFrames(frames ...[]byte) {
 	for _, f := range frames {
 		buf = append(buf, f...)
 	}
-	network.SendTcpData(buf, "10.100.200.230")
+	network.SendTcpData(buf, target)
 }
 
 func reassertReverse(codes []byte, state int) []byte {
@@ -56,8 +56,14 @@ func reassertReverse(codes []byte, state int) []byte {
 	return out
 }
 
-func KeyboardListener(kb *VirtualKeyboard) func(KeyEvent) {
+func KeyboardListener(kb *VirtualKeyboard, a *guiApp) func(KeyEvent) {
 	return func(ev KeyEvent) {
+		// Route all keyboard output to the currently selected device.
+		target := a.selectedDeviceIP()
+		if target == "" {
+			return
+		}
+
 		k := ev.Key
 		state := kb.OptionState()
 		code := ev.Code
@@ -65,7 +71,7 @@ func KeyboardListener(kb *VirtualKeyboard) func(KeyEvent) {
 
 		if k.Type == "OPTION" {
 			if code >= 0 {
-				sendKeystrokes([]byte{byte(code & 0xff)})
+				sendKeystrokes(target, []byte{byte(code & 0xff)})
 			}
 			return
 		}
@@ -74,8 +80,8 @@ func KeyboardListener(kb *VirtualKeyboard) func(KeyEvent) {
 			(k.Type == "COLOR" && state < optFrameColor) {
 
 			if code == 3 {
-				writeFrames(buildPoke(0x0314, 0x7b), buildPoke(0x0091, 127))
-				writeFrames(buildPoke(0x0314, 0x31), buildPoke(0x0091, 255))
+				writeFrames(target, buildPoke(0x0314, 0x7b), buildPoke(0x0091, 127))
+				writeFrames(target, buildPoke(0x0314, 0x31), buildPoke(0x0091, 255))
 				return
 			}
 
@@ -100,7 +106,7 @@ func KeyboardListener(kb *VirtualKeyboard) func(KeyEvent) {
 				}
 				codes = []byte{byte(code & 0xff)}
 			}
-			sendKeystrokes(reassertReverse(codes, state))
+			sendKeystrokes(target, reassertReverse(codes, state))
 			return
 		}
 
@@ -113,7 +119,7 @@ func KeyboardListener(kb *VirtualKeyboard) func(KeyEvent) {
 				frames = append(frames, buildPoke(0xd021, byte(k.Index)))
 			}
 			if len(frames) > 0 {
-				writeFrames(frames...)
+				writeFrames(target, frames...)
 			}
 		}
 	}
