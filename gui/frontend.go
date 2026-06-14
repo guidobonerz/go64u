@@ -40,6 +40,9 @@ import (
 
 	"github.com/ebitengine/oto/v3"
 	"golang.org/x/exp/shiny/materialdesign/icons"
+	xfont "golang.org/x/image/font"
+	"golang.org/x/image/font/basicfont"
+	"golang.org/x/image/math/fixed"
 )
 
 type guiApp struct {
@@ -57,6 +60,8 @@ type guiApp struct {
 	keyboard        *VirtualKeyboard
 	keyboardVisible bool
 	keyboardBtn     widget.Clickable
+	expandBtn       widget.Clickable
+	expanded        bool // when true, show only the selected device's monitor full-size
 	lastWindowW     unit.Dp
 	lastWindowH     unit.Dp
 	keyFocusTag     struct{}
@@ -64,31 +69,55 @@ type guiApp struct {
 	linuxFixedSize bool
 
 	monStats monitorStats
-
-	testCardOp    paint.ImageOp
-	testCardReady bool
 }
 
-// monitorShown reports whether the video monitor area should be laid out. The
-// monitor follows the selected device and is always present when one is
-// selected: it shows that device's live stream, or the test pattern when the
-// device isn't streaming (stopped or offline).
-func (a *guiApp) monitorShown() bool {
+// monitorPanelsLocked returns the device indices shown in the monitor grid.
+// Normally every configured device gets a panel; in expansion mode only the
+// selected device is shown, full-size. Caller holds a.mu.
+func (a *guiApp) monitorPanelsLocked() []int {
+	if a.expanded && a.selectedIdx >= 0 && a.selectedIdx < len(a.devices) {
+		return []int{a.selectedIdx}
+	}
+	idx := make([]int, len(a.devices))
+	for i := range a.devices {
+		idx[i] = i
+	}
+	return idx
+}
+
+func (a *guiApp) monitorPanelCount() int {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	return a.selectedIdx >= 0 && a.selectedIdx < len(a.devices)
+	return len(a.monitorPanelsLocked())
 }
 
-func (a *guiApp) testCard() paint.ImageOp {
-	if !a.testCardReady {
-		a.testCardOp = paint.NewImageOp(makeTestCard())
-		a.testCardOp.Filter = paint.FilterNearest
-		a.testCardReady = true
+// monitorGrid lays panels out in up to 2 columns (a 2×n grid).
+func monitorGrid(count int) (cols, rows int) {
+	if count <= 0 {
+		return 0, 0
 	}
-	return a.testCardOp
+	cols = 1
+	if count >= 2 {
+		cols = 2
+	}
+	rows = (count + cols - 1) / cols
+	return
 }
 
-func makeTestCard() *image.RGBA {
+// deviceTestCard returns the device's cached test pattern, building it (with a
+// central device-name box) on first use.
+func (a *guiApp) deviceTestCard(dev *deviceUI) paint.ImageOp {
+	if !dev.testCardReady {
+		name := dev.description
+
+		dev.testCardOp = paint.NewImageOp(makeTestCard(name))
+		dev.testCardOp.Filter = paint.FilterNearest
+		dev.testCardReady = true
+	}
+	return dev.testCardOp
+}
+
+func makeTestCard(name string) *image.RGBA {
 	const w, h = imaging.WIDTH, imaging.HEIGHT
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 	bars := []color.RGBA{
@@ -107,7 +136,66 @@ func makeTestCard() *image.RGBA {
 			img.SetRGBA(x, y, c)
 		}
 	}
+	drawNameBox(img, name)
 	return img
+}
+
+// drawNameBox draws the device name in white text on a black box centered in
+// the image.
+func drawNameBox(img *image.RGBA, name string) {
+	if name == "" {
+		return
+	}
+	face := basicfont.Face7x13
+	tw := xfont.MeasureString(face, name).Ceil()
+	th := face.Metrics().Height.Ceil()
+	if tw <= 0 || th <= 0 {
+		return
+	}
+
+	// Render the text once at 1x into a temporary mask.
+	tmp := image.NewRGBA(image.Rect(0, 0, tw, th))
+	d := &xfont.Drawer{
+		Dst:  tmp,
+		Src:  image.NewUniform(color.RGBA{255, 255, 255, 255}),
+		Face: face,
+		Dot:  fixed.P(0, face.Metrics().Ascent.Ceil()),
+	}
+	d.DrawString(name)
+
+	const scale, pad = 2, 6
+	dw, dh := tw*scale, th*scale
+	W, H := img.Bounds().Dx(), img.Bounds().Dy()
+	dx0 := (W - dw) / 2
+	dy0 := (H - dh) / 2
+
+	// Black box behind the text.
+	black := color.RGBA{0, 0, 0, 255}
+	for y := dy0 - pad; y < dy0+dh+pad; y++ {
+		for x := dx0 - pad; x < dx0+dw+pad; x++ {
+			if x >= 0 && x < W && y >= 0 && y < H {
+				img.SetRGBA(x, y, black)
+			}
+		}
+	}
+
+	// White text, scaled up (nearest-neighbour).
+	white := color.RGBA{255, 255, 255, 255}
+	for y := 0; y < th; y++ {
+		for x := 0; x < tw; x++ {
+			if _, _, _, a := tmp.At(x, y).RGBA(); a == 0 {
+				continue
+			}
+			for sy := 0; sy < scale; sy++ {
+				for sx := 0; sx < scale; sx++ {
+					px, py := dx0+x*scale+sx, dy0+y*scale+sy
+					if px >= 0 && px < W && py >= 0 && py < H {
+						img.SetRGBA(px, py, white)
+					}
+				}
+			}
+		}
+	}
 }
 
 type monitorStats struct {
@@ -167,8 +255,12 @@ type deviceUI struct {
 	resetBtn     widget.Clickable
 	poweroffBtn  widget.Clickable
 	cardClick    widget.Clickable
+	monitorClick widget.Clickable
 	pauseBtn     widget.Clickable
 	paused       bool
+
+	testCardOp    paint.ImageOp // per-device test pattern with its name box (lazily built)
+	testCardReady bool
 
 	online      bool
 	lastChecked time.Time
@@ -206,6 +298,8 @@ var (
 	iconReset, _         = widget.NewIcon(icons.NavigationRefresh)
 	iconPower, _         = widget.NewIcon(icons.ActionPowerSettingsNew)
 	iconKeyboard, _      = widget.NewIcon(icons.HardwareKeyboard)
+	iconExpand, _        = widget.NewIcon(icons.NavigationFullscreen)
+	iconExpandExit, _    = widget.NewIcon(icons.NavigationFullscreenExit)
 	colorRecording       = color.NRGBA{R: 255, G: 40, B: 40, A: 255}
 	colorCasting         = color.NRGBA{R: 255, G: 215, B: 0, A: 255}
 )
@@ -285,9 +379,8 @@ func newApp() *guiApp {
 	if err != nil {
 		panic(err)
 	}
-	kb.AddListener(KeyboardListener(kb))
 
-	maxW, maxH := computeTargetSize(kb, true, true)
+	maxW, maxH := computeTargetSize(kb, len(devices), true)
 
 	w := new(app.Window)
 	opts := []app.Option{
@@ -318,7 +411,37 @@ func newApp() *guiApp {
 		keyboardVisible: true,
 		linuxFixedSize:  runtime.GOOS == "linux",
 	}
+	// Wire the keyboard after the app exists so it can route to the selected device.
+	kb.AddListener(KeyboardListener(kb, a))
 	return a
+}
+
+// selectedDeviceIP returns the IP address of the currently selected device,
+// or "" if none is selected. The virtual/physical keyboard targets this device.
+func (a *guiApp) selectedDeviceIP() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.selectedIdx >= 0 && a.selectedIdx < len(a.devices) {
+		return a.devices[a.selectedIdx].device.IpAddress
+	}
+	return ""
+}
+
+// indexOf returns the index of dev within a.devices, or -1 if not found.
+func (a *guiApp) indexOf(dev *deviceUI) int {
+	for i := range a.devices {
+		if &a.devices[i] == dev {
+			return i
+		}
+	}
+	return -1
+}
+
+// isSelected reports whether dev is the currently selected device.
+func (a *guiApp) isSelected(idx int) bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.selectedIdx == idx
 }
 
 func (a *guiApp) onlineCheckLoop() {
@@ -333,6 +456,7 @@ func (a *guiApp) onlineCheckLoop() {
 func (a *guiApp) checkAllDevices() {
 	var wg sync.WaitGroup
 	var anyChanged bool
+	var toStart []int
 	var mu sync.Mutex
 	for i := range a.devices {
 		idx := i
@@ -342,21 +466,41 @@ func (a *guiApp) checkAllDevices() {
 			dev := &a.devices[idx]
 			online := network.IsDeviceOnline(dev.device, 2*time.Second)
 			a.mu.Lock()
+			wasOnline := dev.online
 			changed := dev.online != online || dev.lastChecked.IsZero()
 			dev.online = online
 			dev.lastChecked = time.Now()
+			active := dev.active
 			a.mu.Unlock()
 			if changed {
 				mu.Lock()
 				anyChanged = true
+				// Auto-start streaming when a device transitions to online.
+				if online && !wasOnline && !active && dev.device.IfOnlineAutostart {
+					toStart = append(toStart, idx)
+				}
 				mu.Unlock()
 			}
 		}()
 	}
 	wg.Wait()
+	for _, idx := range toStart {
+		a.autoStart(&a.devices[idx])
+	}
 	if anyChanged && a.window != nil {
 		a.window.Invalidate()
 	}
+}
+
+// autoStart begins audio+video streaming for a device that just came online,
+// mirroring a click on its play button. No-op if already active.
+func (a *guiApp) autoStart(dev *deviceUI) {
+	if dev.active {
+		return
+	}
+	dev.active = true
+	a.startAudio(dev)
+	fmt.Printf("Auto-started streams for %s (online)\n", dev.name)
 }
 
 func (a *guiApp) layoutOnlineIndicator(gtx layout.Context, dev *deviceUI) layout.Dimensions {
@@ -423,7 +567,7 @@ func (a *guiApp) run() {
 	}
 }
 
-func computeTargetSize(kb *VirtualKeyboard, hasActiveVideo, keyboardVisible bool) (w, h unit.Dp) {
+func computeTargetSize(kb *VirtualKeyboard, monitorPanels int, keyboardVisible bool) (w, h unit.Dp) {
 	const (
 		insetH      = unit.Dp(20)
 		insetW      = unit.Dp(20)
@@ -452,9 +596,12 @@ func computeTargetSize(kb *VirtualKeyboard, hasActiveVideo, keyboardVisible bool
 	}
 
 	h = insetH + toolbarH + topSpacerH + botSpacerH + separatorH + footSpacerH + footerH
-	if hasActiveVideo {
-		monitorH := unit.Dp(float32(rightW) * float32(imaging.HEIGHT) / float32(imaging.WIDTH))
-		h += monitorH
+	if monitorPanels > 0 {
+		cols, rows := monitorGrid(monitorPanels)
+		gapDp := unit.Dp(10)
+		cellW := (rightW - unit.Dp(cols-1)*gapDp) / unit.Dp(cols)
+		cellH := unit.Dp(float32(cellW) * float32(imaging.HEIGHT) / float32(imaging.WIDTH))
+		h += unit.Dp(rows)*cellH + unit.Dp(rows-1)*gapDp
 	}
 	if keyboardVisible {
 		h += kbSpacerH + kbH
@@ -466,7 +613,13 @@ func (a *guiApp) syncWindowSize() {
 	if a.linuxFixedSize {
 		return
 	}
-	w, h := computeTargetSize(a.keyboard, a.monitorShown(), a.keyboardVisible)
+	// Size for the full device grid regardless of expansion state, so toggling
+	// expand never changes the computed size — otherwise expanding then
+	// reverting would snap the window back and clobber a manual resize.
+	a.mu.RLock()
+	panels := len(a.devices)
+	a.mu.RUnlock()
+	w, h := computeTargetSize(a.keyboard, panels, a.keyboardVisible)
 	if w == a.lastWindowW && h == a.lastWindowH {
 		return
 	}
@@ -505,6 +658,7 @@ func (a *guiApp) layoutRoot(gtx layout.Context) layout.Dimensions {
 		if a.devices[i].cardClick.Clicked(gtx) {
 			a.selectedIdx = i
 			config.GetConfig().SelectedDevice = a.devices[i].name
+			a.window.Invalidate() // redraw now so the selection highlight updates immediately
 		}
 	}
 
@@ -519,7 +673,7 @@ func (a *guiApp) layoutRoot(gtx layout.Context) layout.Dimensions {
 			layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
 
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				showMonitor := a.monitorShown()
+				showMonitor := a.monitorPanelCount() > 0
 
 				return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceEnd}.Layout(gtx,
 
@@ -622,6 +776,10 @@ func (a *guiApp) layoutTopToolbar(gtx layout.Context) layout.Dimensions {
 	if a.keyboardBtn.Clicked(gtx) {
 		a.keyboardVisible = !a.keyboardVisible
 	}
+	if a.expandBtn.Clicked(gtx) {
+		a.expanded = !a.expanded
+		a.window.Invalidate()
+	}
 
 	a.hint = ""
 	switch {
@@ -643,6 +801,8 @@ func (a *guiApp) layoutTopToolbar(gtx layout.Context) layout.Dimensions {
 		a.hint = "Toggle overlay image on cast / recording"
 	case dev.crtBtn.Hovered():
 		a.hint = "Toggle CRT effect on cast / recording"
+	case a.expandBtn.Hovered():
+		a.hint = "Expand the selected monitor to full size"
 	case dev.resetBtn.Hovered():
 		a.hint = "Reset the machine"
 	case dev.poweroffBtn.Hovered():
@@ -843,6 +1003,16 @@ func (a *guiApp) layoutTopToolbar(gtx layout.Context) layout.Dimensions {
 							return layoutGrayIcon(gtx, iconCrt, unit.Dp(28))
 						}
 						return a.layoutIconButton(gtx, &dev.crtBtn, dev.crtOn, dev.active, iconCrt, iconCrt)
+					}),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						// View-only toggle: always enabled and white; the icon
+						// reflects the current expand state.
+						icon := iconExpand
+						if a.expanded {
+							icon = iconExpandExit
+						}
+						return a.layoutIconButton(gtx, &a.expandBtn, true, true, icon, icon)
 					}),
 
 					layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
@@ -1076,16 +1246,21 @@ func (a *guiApp) layoutVideoMonitor(gtx layout.Context) layout.Dimensions {
 	const framePeriod = 20 * time.Millisecond
 	stats := &a.monStats
 
-	// The monitor follows the selected device: show its live stream, or the
-	// test pattern when that device isn't streaming (stopped or offline) —
-	// even if a different device is streaming in the background.
-	selIdx := a.selectedIdx
-	liveVideo := false
-	var showOp paint.ImageOp
+	// One panel per online/streaming device (plus the selected one), each
+	// showing its own live stream or the test pattern. Laid out in a 2×n grid.
+	type panel struct {
+		idx int
+		op  paint.ImageOp
+	}
+	var panels []panel
+	anyLive := false
+
 	a.mu.Lock()
-	if selIdx >= 0 && selIdx < len(a.devices) {
-		dev := &a.devices[selIdx]
+	for _, i := range a.monitorPanelsLocked() {
+		dev := &a.devices[i]
 		confirmedOffline := !dev.online && !dev.lastChecked.IsZero()
+		pop := a.deviceTestCard(dev)
+		live := false
 		if dev.videoActive {
 			if !gtx.Now.Before(dev.nextFrameDue) {
 				if len(dev.frameQueue) > 0 {
@@ -1100,30 +1275,30 @@ func (a *guiApp) layoutVideoMonitor(gtx layout.Context) layout.Dimensions {
 					stats.starved++
 				}
 			}
-
 			if n := len(dev.frameQueue); n > 2 {
 				dev.frameQueue = dev.frameQueue[n-2:]
 				stats.trimmed += n - 2
 			}
 			if dev.shownFrame.img != nil && !confirmedOffline {
-				showOp = dev.shownFrame.op
-				liveVideo = true
+				pop = dev.shownFrame.op
+				live = true
 			}
+		}
+		panels = append(panels, panel{idx: i, op: pop})
+		if live {
+			anyLive = true
 		}
 	}
 	a.mu.Unlock()
 
-	if !liveVideo {
-		showOp = a.testCard()
+	if len(panels) == 0 {
+		return layout.Dimensions{}
 	}
-	activeOps := []paint.ImageOp{showOp}
-	activeIdx := []int{selIdx}
 
-	if liveVideo {
+	// Keep redrawing at display rate while any panel shows live video (pacing).
+	if anyLive {
 		gtx.Execute(op.InvalidateCmd{})
-	}
 
-	if liveVideo {
 		stats.events++
 		if !stats.lastEvent.IsZero() {
 			if gap := gtx.Now.Sub(stats.lastEvent); gap > stats.maxGap {
@@ -1150,44 +1325,50 @@ func (a *guiApp) layoutVideoMonitor(gtx layout.Context) layout.Dimensions {
 		stats.lastReport = time.Time{}
 	}
 
-	count := len(activeOps)
-	if count == 0 {
-		count = 1
-	}
+	cols, rows := monitorGrid(len(panels))
 
 	totalW := gtx.Constraints.Max.X
-
 	if a.keyboard != nil && a.keyboardVisible {
 		if minW := a.keyboard.MaxWidth(gtx); totalW < minW {
 			totalW = minW
 		}
 	}
 	gap := gtx.Dp(unit.Dp(10))
-	totalGap := gap * (count - 1)
-	cellW := (totalW - totalGap) / count
+	cellW := (totalW - (cols-1)*gap) / cols
 	cellH := cellW * imaging.HEIGHT / imaging.WIDTH
-	sz := image.Pt(totalW, cellH)
+	totalH := rows*cellH + (rows-1)*gap
+	sz := image.Pt(totalW, totalH)
 	gtx.Constraints = layout.Exact(sz)
 
 	monitorOriginX := gtx.Dp(unit.Dp(10)) + gtx.Dp(unit.Dp(280)) + gtx.Dp(unit.Dp(10))
 	monitorOriginY := gtx.Dp(unit.Dp(10)) + a.toolbarHeightPx + gtx.Dp(unit.Dp(10))
 
-	hits := make([]dropHit, 0, len(activeOps))
-
+	hits := make([]dropHit, 0, len(panels))
 	borderWidth := gtx.Dp(unit.Dp(3))
 	borderRadius := gtx.Dp(unit.Dp(8))
-	for i, imgOp := range activeOps {
-		absX := monitorOriginX + i*(cellW+gap)
-		absY := monitorOriginY
+	for n, p := range panels {
+		col := n % cols
+		row := n / cols
+		offX := col * (cellW + gap)
+		offY := row * (cellH + gap)
 		hits = append(hits, dropHit{
-			rect:   image.Rect(absX, absY, absX+cellW, absY+cellH),
-			devIdx: activeIdx[i],
+			rect:   image.Rect(monitorOriginX+offX, monitorOriginY+offY, monitorOriginX+offX+cellW, monitorOriginY+offY+cellH),
+			devIdx: p.idx,
 		})
-		offsetX := i * (cellW + gap)
-		stack := op.Offset(image.Pt(offsetX, 0)).Push(gtx.Ops)
+
+		// Clicking a monitor panel selects that device (same as clicking its
+		// card), so the keyboard/audio follow what the user is looking at.
+		devIdx := p.idx
+		if a.devices[devIdx].monitorClick.Clicked(gtx) {
+			a.selectedIdx = devIdx
+			config.GetConfig().SelectedDevice = a.devices[devIdx].name
+			a.window.Invalidate() // redraw now so the selection border updates immediately
+		}
+
+		stack := op.Offset(image.Pt(offX, offY)).Push(gtx.Ops)
 
 		borderCol := colorSeparator
-		if len(activeOps) > 1 && activeIdx[i] == a.selectedIdx {
+		if len(panels) > 1 && devIdx == a.selectedIdx {
 			borderCol = colorInactive
 		}
 		rrect := clip.RRect{
@@ -1203,15 +1384,29 @@ func (a *guiApp) layoutVideoMonitor(gtx layout.Context) layout.Dimensions {
 			SE:   borderRadius, SW: borderRadius, NE: borderRadius, NW: borderRadius,
 		}.Push(gtx.Ops)
 
-		fsz := imgOp.Size()
+		fsz := p.op.Size()
 		scaleX := float32(cellW) / float32(fsz.X)
 		scaleY := float32(cellH) / float32(fsz.Y)
-		imgOp.Add(gtx.Ops)
+		p.op.Add(gtx.Ops)
 		t := f32.Affine2D{}.Scale(f32.Pt(0, 0), f32.Pt(scaleX, scaleY))
-		op.Affine(t).Add(gtx.Ops)
+		// Scope the scale transform so it doesn't leak past clipStack.Pop into
+		// the click overlay below — an unscoped Add would scale/shift the
+		// panel's hit area and make monitor clicks miss.
+		aff := op.Affine(t).Push(gtx.Ops)
 		paint.PaintOp{}.Add(gtx.Ops)
+		aff.Pop()
 
 		clipStack.Pop()
+
+		// Transparent click overlay covering the cell so clicking the monitor
+		// selects this device. Registered after drawing so it sits on top for
+		// hit-testing; it draws nothing itself.
+		cgtx := gtx
+		cgtx.Constraints = layout.Exact(image.Pt(cellW, cellH))
+		a.devices[devIdx].monitorClick.Layout(cgtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Dimensions{Size: image.Pt(cellW, cellH)}
+		})
+
 		stack.Pop()
 	}
 
@@ -1275,15 +1470,9 @@ func (r *guiVideoRenderer) Render(data []byte) bool {
 
 	palImg := r.reusableImg.Decode(data)
 
-	activeCount := 0
-	r.app.mu.RLock()
-	for i := range r.app.devices {
-		if r.app.devices[i].videoActive {
-			activeCount++
-		}
-	}
-	r.app.mu.RUnlock()
-	crtOn := r.dev.crtOn && activeCount == 1
+	// CRT is strictly per-device: each device's frames are rendered with that
+	// device's own toggle, independent of how many devices are streaming.
+	crtOn := r.dev.crtOn
 
 	r.backIdx = (r.backIdx + 1) % monitorBufs
 	var frame *image.RGBA
@@ -1731,11 +1920,15 @@ func (a *guiApp) startAudioReader(dev *deviceUI) {
 	}
 	dev.audioPlaying = true
 	dev.audioStopCh = make(chan struct{})
+	devIdx := a.indexOf(dev)
 	var lastWaveform time.Time
 	audioReader := streams.AudioReader{
 		Device:       dev.device,
 		AudioContext: a.otoCtx,
 		StopChan:     dev.audioStopCh,
+		// Only the selected device is audible; others still read & forward
+		// audio (waveform, recording, casting) but play silently.
+		ShouldPlay: func() bool { return a.isSelected(devIdx) },
 		Renderer: func(data []byte) {
 
 			a.mu.RLock()

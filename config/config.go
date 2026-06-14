@@ -16,7 +16,7 @@ type Overlay struct {
 	ImagePath string `yaml:"ImagePath"`
 	X         int    `yaml:"X"`
 	Y         int    `yaml:"Y"`
-	WITH      int    `yaml:"WIDTH"`
+	WIDTH     int    `yaml:"WIDTH"`
 	HEIGHT    int    `yaml:"HEIGHT"`
 }
 
@@ -39,6 +39,7 @@ type Config struct {
 type Device struct {
 	Description        string          `yaml:"Description"`
 	IsDefault          bool            `yaml:"IsDefault"`
+	IfOnlineAutostart  bool            `yaml:"IfOnlineAutostart"`
 	IpAddress          string          `yaml:"IpAddress"`
 	AudioPort          int             `yaml:"AudioPort"`
 	VideoPort          int             `yaml:"VideoPort"`
