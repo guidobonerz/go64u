@@ -40,6 +40,9 @@ import (
 
 	"github.com/ebitengine/oto/v3"
 	"golang.org/x/exp/shiny/materialdesign/icons"
+	xfont "golang.org/x/image/font"
+	"golang.org/x/image/font/basicfont"
+	"golang.org/x/image/math/fixed"
 )
 
 type guiApp struct {
@@ -66,9 +69,6 @@ type guiApp struct {
 	linuxFixedSize bool
 
 	monStats monitorStats
-
-	testCardOp    paint.ImageOp
-	testCardReady bool
 }
 
 // monitorPanelsLocked returns the device indices shown in the monitor grid.
@@ -104,16 +104,20 @@ func monitorGrid(count int) (cols, rows int) {
 	return
 }
 
-func (a *guiApp) testCard() paint.ImageOp {
-	if !a.testCardReady {
-		a.testCardOp = paint.NewImageOp(makeTestCard())
-		a.testCardOp.Filter = paint.FilterNearest
-		a.testCardReady = true
+// deviceTestCard returns the device's cached test pattern, building it (with a
+// central device-name box) on first use.
+func (a *guiApp) deviceTestCard(dev *deviceUI) paint.ImageOp {
+	if !dev.testCardReady {
+		name := dev.description
+
+		dev.testCardOp = paint.NewImageOp(makeTestCard(name))
+		dev.testCardOp.Filter = paint.FilterNearest
+		dev.testCardReady = true
 	}
-	return a.testCardOp
+	return dev.testCardOp
 }
 
-func makeTestCard() *image.RGBA {
+func makeTestCard(name string) *image.RGBA {
 	const w, h = imaging.WIDTH, imaging.HEIGHT
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 	bars := []color.RGBA{
@@ -132,7 +136,66 @@ func makeTestCard() *image.RGBA {
 			img.SetRGBA(x, y, c)
 		}
 	}
+	drawNameBox(img, name)
 	return img
+}
+
+// drawNameBox draws the device name in white text on a black box centered in
+// the image.
+func drawNameBox(img *image.RGBA, name string) {
+	if name == "" {
+		return
+	}
+	face := basicfont.Face7x13
+	tw := xfont.MeasureString(face, name).Ceil()
+	th := face.Metrics().Height.Ceil()
+	if tw <= 0 || th <= 0 {
+		return
+	}
+
+	// Render the text once at 1x into a temporary mask.
+	tmp := image.NewRGBA(image.Rect(0, 0, tw, th))
+	d := &xfont.Drawer{
+		Dst:  tmp,
+		Src:  image.NewUniform(color.RGBA{255, 255, 255, 255}),
+		Face: face,
+		Dot:  fixed.P(0, face.Metrics().Ascent.Ceil()),
+	}
+	d.DrawString(name)
+
+	const scale, pad = 2, 6
+	dw, dh := tw*scale, th*scale
+	W, H := img.Bounds().Dx(), img.Bounds().Dy()
+	dx0 := (W - dw) / 2
+	dy0 := (H - dh) / 2
+
+	// Black box behind the text.
+	black := color.RGBA{0, 0, 0, 255}
+	for y := dy0 - pad; y < dy0+dh+pad; y++ {
+		for x := dx0 - pad; x < dx0+dw+pad; x++ {
+			if x >= 0 && x < W && y >= 0 && y < H {
+				img.SetRGBA(x, y, black)
+			}
+		}
+	}
+
+	// White text, scaled up (nearest-neighbour).
+	white := color.RGBA{255, 255, 255, 255}
+	for y := 0; y < th; y++ {
+		for x := 0; x < tw; x++ {
+			if _, _, _, a := tmp.At(x, y).RGBA(); a == 0 {
+				continue
+			}
+			for sy := 0; sy < scale; sy++ {
+				for sx := 0; sx < scale; sx++ {
+					px, py := dx0+x*scale+sx, dy0+y*scale+sy
+					if px >= 0 && px < W && py >= 0 && py < H {
+						img.SetRGBA(px, py, white)
+					}
+				}
+			}
+		}
+	}
 }
 
 type monitorStats struct {
@@ -195,6 +258,9 @@ type deviceUI struct {
 	monitorClick widget.Clickable
 	pauseBtn     widget.Clickable
 	paused       bool
+
+	testCardOp    paint.ImageOp // per-device test pattern with its name box (lazily built)
+	testCardReady bool
 
 	online      bool
 	lastChecked time.Time
@@ -390,6 +456,7 @@ func (a *guiApp) onlineCheckLoop() {
 func (a *guiApp) checkAllDevices() {
 	var wg sync.WaitGroup
 	var anyChanged bool
+	var toStart []int
 	var mu sync.Mutex
 	for i := range a.devices {
 		idx := i
@@ -399,21 +466,41 @@ func (a *guiApp) checkAllDevices() {
 			dev := &a.devices[idx]
 			online := network.IsDeviceOnline(dev.device, 2*time.Second)
 			a.mu.Lock()
+			wasOnline := dev.online
 			changed := dev.online != online || dev.lastChecked.IsZero()
 			dev.online = online
 			dev.lastChecked = time.Now()
+			active := dev.active
 			a.mu.Unlock()
 			if changed {
 				mu.Lock()
 				anyChanged = true
+				// Auto-start streaming when a device transitions to online.
+				if online && !wasOnline && !active && dev.device.IfOnlineAutostart {
+					toStart = append(toStart, idx)
+				}
 				mu.Unlock()
 			}
 		}()
 	}
 	wg.Wait()
+	for _, idx := range toStart {
+		a.autoStart(&a.devices[idx])
+	}
 	if anyChanged && a.window != nil {
 		a.window.Invalidate()
 	}
+}
+
+// autoStart begins audio+video streaming for a device that just came online,
+// mirroring a click on its play button. No-op if already active.
+func (a *guiApp) autoStart(dev *deviceUI) {
+	if dev.active {
+		return
+	}
+	dev.active = true
+	a.startAudio(dev)
+	fmt.Printf("Auto-started streams for %s (online)\n", dev.name)
 }
 
 func (a *guiApp) layoutOnlineIndicator(gtx layout.Context, dev *deviceUI) layout.Dimensions {
@@ -526,7 +613,13 @@ func (a *guiApp) syncWindowSize() {
 	if a.linuxFixedSize {
 		return
 	}
-	w, h := computeTargetSize(a.keyboard, a.monitorPanelCount(), a.keyboardVisible)
+	// Size for the full device grid regardless of expansion state, so toggling
+	// expand never changes the computed size — otherwise expanding then
+	// reverting would snap the window back and clobber a manual resize.
+	a.mu.RLock()
+	panels := len(a.devices)
+	a.mu.RUnlock()
+	w, h := computeTargetSize(a.keyboard, panels, a.keyboardVisible)
 	if w == a.lastWindowW && h == a.lastWindowH {
 		return
 	}
@@ -1152,7 +1245,6 @@ func (a *guiApp) layoutVideoMonitor(gtx layout.Context) layout.Dimensions {
 
 	const framePeriod = 20 * time.Millisecond
 	stats := &a.monStats
-	testOp := a.testCard()
 
 	// One panel per online/streaming device (plus the selected one), each
 	// showing its own live stream or the test pattern. Laid out in a 2×n grid.
@@ -1167,7 +1259,7 @@ func (a *guiApp) layoutVideoMonitor(gtx layout.Context) layout.Dimensions {
 	for _, i := range a.monitorPanelsLocked() {
 		dev := &a.devices[i]
 		confirmedOffline := !dev.online && !dev.lastChecked.IsZero()
-		pop := testOp
+		pop := a.deviceTestCard(dev)
 		live := false
 		if dev.videoActive {
 			if !gtx.Now.Before(dev.nextFrameDue) {
@@ -1297,8 +1389,12 @@ func (a *guiApp) layoutVideoMonitor(gtx layout.Context) layout.Dimensions {
 		scaleY := float32(cellH) / float32(fsz.Y)
 		p.op.Add(gtx.Ops)
 		t := f32.Affine2D{}.Scale(f32.Pt(0, 0), f32.Pt(scaleX, scaleY))
-		op.Affine(t).Add(gtx.Ops)
+		// Scope the scale transform so it doesn't leak past clipStack.Pop into
+		// the click overlay below — an unscoped Add would scale/shift the
+		// panel's hit area and make monitor clicks miss.
+		aff := op.Affine(t).Push(gtx.Ops)
 		paint.PaintOp{}.Add(gtx.Ops)
+		aff.Pop()
 
 		clipStack.Pop()
 

@@ -287,7 +287,8 @@ The online check runs automatically every 5 seconds in the background.
 
 ### Drag & Drop (Windows)
 
-On Windows, files can be dragged and dropped onto a device monitor window. The file is automatically routed to the correct device based on the drop position in the grid.
+On Windows, files can be dragged and dropped onto a device monitor window. The file is automatically routed to the correct device based on the drop position in the grid. 
+Actually, it works for PRG files only. 
 
 ### Recording & Streaming
 
@@ -315,9 +316,9 @@ On Windows, files can be dragged and dropped onto a device monitor window. The f
 #### Single Stream
 ![Stream Player Monitor](https://github.com/guidobonerz/go64u/blob/main/doc/gui_streamplayer.png)
 #### Multiple Stream
-![Stream Player Monitor](https://github.com/guidobonerz/go64u/blob/main/doc/split.png)
+![Stream Player Monitor](https://github.com/guidobonerz/go64u/blob/main/doc/four_monitors.png)
 #### Virtual keyboard
-![Stream Player Monitor](https://github.com/guidobonerz/go64u/blob/main/doc/keyboard.png)
+![Stream Player Monitor](https://github.com/guidobonerz/go64u/blob/main/doc/expanded_monitor.png)
 
 ---
 
@@ -334,12 +335,14 @@ Devices:
   DEVICE_NAME1:
     Description: "Device Nme"
     IsDefault: true
+    IfOnlineAutostart: true
     IpAddress: <ip of device>
     VideoPort: 11000
     AudioPort: 11001
     DebugPort: 11002
   DEVICE_NAME2:
     Description: "Device name"
+    IfOnlineAutostart: false
     IpAddress: <ip of device>
     VideoPort: 21000
     AudioPort: 21001
@@ -354,10 +357,10 @@ ScreenshotFolder: <path to screenshot folder>
 RecordingFolder: <path to recording folder>
 Overlay:
   ImagePath: <path to 1920x1080 overlay PNG with transparent stream area>
-  GameX: 160
-  GameY: 100
-  GameW: 1536
-  GameH: 1088
+  X: 160
+  Y: 100
+  WIDTH: 1536
+  HEIGHT: 1088
 ```
 
 > **Note:** If you have more than one Ultimate64 board, you have to choose different ports for each board.

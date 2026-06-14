@@ -329,7 +329,7 @@ func (d *StreamRenderer) composeFrameInto(buf []byte, gameImg image.Image, withO
 		overlay := config.GetConfig().Overlay
 		dstX = overlay.X
 		dstY = overlay.Y
-		dstW = overlay.WITH
+		dstW = overlay.WIDTH
 		dstH = overlay.HEIGHT
 	} else {
 
