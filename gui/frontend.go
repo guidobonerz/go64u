@@ -421,6 +421,7 @@ func newApp() *guiApp {
 		devices[i].audioMonitor = true
 		devices[i].videoMonitor = true
 		devices[i].overlayOn = hasOverlay
+		devices[i].crtOn = devices[i].device.CrtMode
 	}
 
 	kb, err := NewVirtualKeyboard(nil)
@@ -458,6 +459,9 @@ func newApp() *guiApp {
 		keyboard:        kb,
 		keyboardVisible: true,
 		linuxFixedSize:  runtime.GOOS == "linux",
+		// A single configured device has no cards to switch between, so start in
+		// expand mode and show its monitor full-size.
+		expanded: len(devices) == 1,
 	}
 	// Wire the keyboard after the app exists so it can route to the selected device.
 	kb.AddListener(KeyboardListener(kb, a))
@@ -632,13 +636,19 @@ func computeTargetSize(kb *VirtualKeyboard, monitorPanels int, keyboardVisible b
 		defaultW    = unit.Dp(800)
 	)
 
-	rightW := defaultW - insetW - cardsW - columnGapW
+	// With a single configured device the left device-card column is hidden, so
+	// it must not be reserved in the window width either.
+	leftW := cardsW + columnGapW
+	if monitorPanels <= 1 {
+		leftW = 0
+	}
+	rightW := defaultW - insetW - leftW
 	if kb != nil {
 		if kbW := kb.MaxWidthDp(); kbW > rightW {
 			rightW = kbW
 		}
 	}
-	w = insetW + cardsW + columnGapW + rightW
+	w = insetW + leftW + rightW
 	if w < defaultW {
 		w = defaultW
 	}
@@ -722,6 +732,33 @@ func (a *guiApp) layoutRoot(gtx layout.Context) layout.Dimensions {
 
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				showMonitor := a.monitorPanelCount() > 0
+				// Hide the device-card column when only one device is configured;
+				// there is nothing to switch between and the monitor uses the full
+				// width instead.
+				showCards := len(a.devices) > 1
+
+				monitorCol := layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if showMonitor {
+								return a.layoutVideoMonitor(gtx)
+							}
+							return layout.Dimensions{}
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if !a.keyboardVisible || a.keyboard == nil {
+								return layout.Dimensions{}
+							}
+							return layout.Inset{Top: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return a.keyboard.Layout(a.theme, gtx)
+							})
+						}),
+					)
+				})
+
+				if !showCards {
+					return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceEnd}.Layout(gtx, monitorCol)
+				}
 
 				return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceEnd}.Layout(gtx,
 
@@ -746,24 +783,7 @@ func (a *guiApp) layoutRoot(gtx layout.Context) layout.Dimensions {
 
 					layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
 
-					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								if showMonitor {
-									return a.layoutVideoMonitor(gtx)
-								}
-								return layout.Dimensions{}
-							}),
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								if !a.keyboardVisible || a.keyboard == nil {
-									return layout.Dimensions{}
-								}
-								return layout.Inset{Top: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-									return a.keyboard.Layout(a.theme, gtx)
-								})
-							}),
-						)
-					}),
+					monitorCol,
 				)
 			}),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
@@ -943,6 +963,11 @@ func (a *guiApp) layoutTopToolbar(gtx layout.Context) layout.Dimensions {
 			if dev.active {
 				a.stopAudio(dev)
 			}
+			// Clear active so that when the device powers back on the online
+			// check sees an inactive device and re-triggers autostart. Without
+			// this, active stays true, the autostart gate (!active) fails, and
+			// the test card stays up instead of the resumed video.
+			dev.active = false
 			commands.PowerOff()
 			dev.online = false
 			dev.lastChecked = time.Now()
