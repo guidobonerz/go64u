@@ -22,14 +22,18 @@ func MountCommand() *cobra.Command {
 			if !isValidDrive(args[0]) {
 				panic("not a valid drive name, A or B required")
 			}
-			payload, _ := util.ReadFile(args[1])
-			network.SendHttpRequest(&network.HttpConfig{
-				URL:     network.GetUrl(fmt.Sprintf("drives/%s:mount?type=d64&mode=readwrite", args[0])),
-				Method:  http.MethodPost,
-				Payload: payload,
-			})
+			MountDiskImage(args)
 		},
 	}
+}
+
+func MountDiskImage(args []string) {
+	payload, _ := util.ReadFile(args[1])
+	network.SendHttpRequest(&network.HttpConfig{
+		URL:     network.GetUrl(fmt.Sprintf("drives/%s:mount?type=d64&mode=readwrite", args[0])),
+		Method:  http.MethodPost,
+		Payload: payload,
+	})
 }
 
 func UnmountCommand() *cobra.Command {
@@ -40,15 +44,20 @@ func UnmountCommand() *cobra.Command {
 		GroupID: "runner",
 		Args:    cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			if !isValidDrive(args[0]) {
-				panic("not a valid drive name, A or B required")
-			}
-			network.SendHttpRequest(&network.HttpConfig{
-				URL:    network.GetUrl(fmt.Sprintf("drives/%s:remove?type=d64&mode=readwrite", args[0])),
-				Method: http.MethodPut,
-			})
+			UnmountDiskImage(args[0])
 		},
 	}
+}
+
+func UnmountDiskImage(driveId string) {
+
+	if !isValidDrive(driveId) {
+		panic("not a valid drive name, A or B required")
+	}
+	network.SendHttpRequest(&network.HttpConfig{
+		URL:    network.GetUrl(fmt.Sprintf("drives/%s:remove", driveId)),
+		Method: http.MethodPut,
+	})
 }
 
 func DrivesCommand() *cobra.Command {
