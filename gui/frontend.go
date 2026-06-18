@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -308,8 +309,8 @@ func Run() {
 	go func() {
 		a := newApp()
 		go a.onlineCheckLoop()
-		enableFileDrop("go64u - monitor", func(x, y int, data []byte) {
-			go a.handleDrop(x, y, data)
+		enableFileDrop("go64u - monitor", func(x, y int, name string, data []byte) {
+			go a.handleDrop(x, y, name, data)
 		})
 
 		a.run()
@@ -318,7 +319,7 @@ func Run() {
 	app.Main()
 }
 
-func (a *guiApp) handleDrop(x, y int, data []byte) {
+func (a *guiApp) handleDrop(x, y int, name string, data []byte) {
 	var devIdx = -1
 	a.dropMu.Lock()
 	for _, h := range a.dropHits {
@@ -328,6 +329,17 @@ func (a *guiApp) handleDrop(x, y int, data []byte) {
 		}
 	}
 	a.dropMu.Unlock()
+
+	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(name), "."))
+
+	if isDiskImage(ext) {
+		device := a.dropTargetDevice(devIdx)
+		if device == nil {
+			return
+		}
+		a.mountAndAutoload(device, name)
+		return
+	}
 
 	if devIdx < 0 {
 		commands.Run(data)
@@ -339,6 +351,42 @@ func (a *guiApp) handleDrop(x, y int, data []byte) {
 		Method:  http.MethodPost,
 		Payload: data,
 	})
+}
+
+func isDiskImage(ext string) bool {
+	switch ext {
+	case "d64", "g64", "d71", "g71", "d81":
+		return true
+	}
+	return false
+}
+
+// dropTargetDevice resolves the device a drop should act on: the panel that was
+// hit, or the currently selected device when the drop landed outside any panel.
+func (a *guiApp) dropTargetDevice(devIdx int) *config.Device {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if devIdx < 0 {
+		devIdx = a.selectedIdx
+	}
+	if devIdx < 0 || devIdx >= len(a.devices) {
+		return nil
+	}
+	return a.devices[devIdx].device
+}
+
+func (a *guiApp) mountAndAutoload(device *config.Device, filename string) {
+	commands.UnmountDiskImage("A")
+	time.Sleep(750 * time.Millisecond)
+	commands.Reset()
+	time.Sleep(1200 * time.Millisecond)
+	commands.MountDiskImage([]string{"A", filename})
+
+	time.Sleep(750 * time.Millisecond)
+	codes := append([]byte(`LOAD"*",8,1`), 13)
+	codes = append(codes, []byte("RUN")...)
+	codes = append(codes, 13)
+	sendKeystrokes(device.IpAddress, codes)
 }
 
 func newApp() *guiApp {
