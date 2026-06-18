@@ -39,6 +39,7 @@ type Config struct {
 type Device struct {
 	Description        string          `yaml:"Description"`
 	IsDefault          bool            `yaml:"IsDefault"`
+	CrtMode            bool            `yaml:"CrtMode"`
 	IfOnlineAutostart  bool            `yaml:"IfOnlineAutostart"`
 	IpAddress          string          `yaml:"IpAddress"`
 	AudioPort          int             `yaml:"AudioPort"`
