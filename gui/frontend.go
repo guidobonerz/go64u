@@ -1509,6 +1509,14 @@ type guiVideoRenderer struct {
 	scaledFrames [monitorBufs]*image.RGBA
 	backIdx      int
 
+	// HiresMode (interlace) merge state: the C64 sends the two interlaced
+	// fields as consecutive frames. prevField holds the first field of a pair;
+	// when the second arrives the two are averaged per-pixel into
+	// mergedFrames[backIdx] for display.
+	prevField    *image.RGBA
+	havePrev     bool
+	mergedFrames [monitorBufs]*image.RGBA
+
 	// CRT bloom scratch buffers (native-resolution RGB), lazily allocated.
 	glowSrc []byte // thresholded bright pixels
 	glowTmp []byte // separable-blur intermediate
@@ -1555,21 +1563,31 @@ func (r *guiVideoRenderer) Render(data []byte) bool {
 		frame = r.renderNative(palImg)
 	}
 
-	imgOp := paint.NewImageOp(frame)
-	if !crtOn {
-
-		imgOp.Filter = paint.FilterNearest
+	// In HiresMode the stream is interlaced: hold the first field of each pair
+	// and only emit once it has been merged (per-pixel averaged) with the
+	// second field.
+	outFrame := frame
+	emit := true
+	if r.dev.device.HiresMode {
+		outFrame, emit = r.mergeHires(frame)
 	}
 
-	r.app.monStats.arrived.Add(1)
-	r.app.mu.Lock()
-	q := append(r.dev.frameQueue, monitorFrame{op: imgOp, img: frame})
-	if len(q) > 3 {
-		q = q[len(q)-3:]
+	if emit {
+		imgOp := paint.NewImageOp(outFrame)
+		if !crtOn {
+			imgOp.Filter = paint.FilterNearest
+		}
+
+		r.app.monStats.arrived.Add(1)
+		r.app.mu.Lock()
+		q := append(r.dev.frameQueue, monitorFrame{op: imgOp, img: outFrame})
+		if len(q) > 3 {
+			q = q[len(q)-3:]
+		}
+		r.dev.frameQueue = q
+		r.app.mu.Unlock()
+		r.app.window.Invalidate()
 	}
-	r.dev.frameQueue = q
-	r.app.mu.Unlock()
-	r.app.window.Invalidate()
 
 	if r.dev.rawFrameCh != nil {
 		rawCopy := make([]byte, len(data))
@@ -1746,6 +1764,43 @@ func boxBlurRGB(src, tmp, dst []byte, w, h, radius int) {
 			dst[o+1] = byte(sg / div)
 			dst[o+2] = byte(sb / div)
 		}
+	}
+}
+
+// mergeHires implements the interlace merge for HiresMode. The first field of
+// each pair is stored and nothing is emitted (emit=false); when the second
+// field arrives the two are averaged per pixel into a fresh ring buffer that is
+// returned for display (emit=true). A change in frame bounds (e.g. CRT being
+// toggled) resets the pairing so mismatched buffers are never blended.
+func (r *guiVideoRenderer) mergeHires(cur *image.RGBA) (*image.RGBA, bool) {
+	b := cur.Bounds()
+	if r.prevField == nil || r.prevField.Bounds() != b {
+		r.prevField = image.NewRGBA(b)
+		copy(r.prevField.Pix, cur.Pix)
+		r.havePrev = true
+		return cur, false
+	}
+	if !r.havePrev {
+		copy(r.prevField.Pix, cur.Pix)
+		r.havePrev = true
+		return cur, false
+	}
+	out := r.mergedFrames[r.backIdx]
+	if out == nil || out.Bounds() != b {
+		out = image.NewRGBA(b)
+		r.mergedFrames[r.backIdx] = out
+	}
+	averageRGBA(r.prevField, cur, out)
+	r.havePrev = false
+	return out, true
+}
+
+// averageRGBA writes the per-channel average of a and b into dst. All three
+// must share identical bounds (and therefore stride and pixel length).
+func averageRGBA(a, b, dst *image.RGBA) {
+	ap, bp, dp := a.Pix, b.Pix, dst.Pix
+	for i := range dp {
+		dp[i] = byte((int(ap[i]) + int(bp[i])) >> 1)
 	}
 }
 
