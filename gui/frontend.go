@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -308,8 +309,8 @@ func Run() {
 	go func() {
 		a := newApp()
 		go a.onlineCheckLoop()
-		enableFileDrop("go64u - monitor", func(x, y int, data []byte) {
-			go a.handleDrop(x, y, data)
+		enableFileDrop("go64u - monitor", func(x, y int, name string, data []byte) {
+			go a.handleDrop(x, y, name, data)
 		})
 
 		a.run()
@@ -318,7 +319,7 @@ func Run() {
 	app.Main()
 }
 
-func (a *guiApp) handleDrop(x, y int, data []byte) {
+func (a *guiApp) handleDrop(x, y int, name string, data []byte) {
 	var devIdx = -1
 	a.dropMu.Lock()
 	for _, h := range a.dropHits {
@@ -328,6 +329,17 @@ func (a *guiApp) handleDrop(x, y int, data []byte) {
 		}
 	}
 	a.dropMu.Unlock()
+
+	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(name), "."))
+
+	if isDiskImage(ext) {
+		device := a.dropTargetDevice(devIdx)
+		if device == nil {
+			return
+		}
+		a.mountAndAutoload(device, name)
+		return
+	}
 
 	if devIdx < 0 {
 		commands.Run(data)
@@ -339,6 +351,42 @@ func (a *guiApp) handleDrop(x, y int, data []byte) {
 		Method:  http.MethodPost,
 		Payload: data,
 	})
+}
+
+func isDiskImage(ext string) bool {
+	switch ext {
+	case "d64", "g64", "d71", "g71", "d81":
+		return true
+	}
+	return false
+}
+
+// dropTargetDevice resolves the device a drop should act on: the panel that was
+// hit, or the currently selected device when the drop landed outside any panel.
+func (a *guiApp) dropTargetDevice(devIdx int) *config.Device {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if devIdx < 0 {
+		devIdx = a.selectedIdx
+	}
+	if devIdx < 0 || devIdx >= len(a.devices) {
+		return nil
+	}
+	return a.devices[devIdx].device
+}
+
+func (a *guiApp) mountAndAutoload(device *config.Device, filename string) {
+	commands.UnmountDiskImage("A")
+	time.Sleep(750 * time.Millisecond)
+	commands.Reset()
+	time.Sleep(1200 * time.Millisecond)
+	commands.MountDiskImage([]string{"A", filename})
+
+	time.Sleep(750 * time.Millisecond)
+	codes := append([]byte(`LOAD"*",8,1`), 13)
+	codes = append(codes, []byte("RUN")...)
+	codes = append(codes, 13)
+	sendKeystrokes(device.IpAddress, codes)
 }
 
 func newApp() *guiApp {
@@ -373,6 +421,7 @@ func newApp() *guiApp {
 		devices[i].audioMonitor = true
 		devices[i].videoMonitor = true
 		devices[i].overlayOn = hasOverlay
+		devices[i].crtOn = devices[i].device.CrtMode
 	}
 
 	kb, err := NewVirtualKeyboard(nil)
@@ -410,6 +459,9 @@ func newApp() *guiApp {
 		keyboard:        kb,
 		keyboardVisible: true,
 		linuxFixedSize:  runtime.GOOS == "linux",
+		// A single configured device has no cards to switch between, so start in
+		// expand mode and show its monitor full-size.
+		expanded: len(devices) == 1,
 	}
 	// Wire the keyboard after the app exists so it can route to the selected device.
 	kb.AddListener(KeyboardListener(kb, a))
@@ -584,13 +636,19 @@ func computeTargetSize(kb *VirtualKeyboard, monitorPanels int, keyboardVisible b
 		defaultW    = unit.Dp(800)
 	)
 
-	rightW := defaultW - insetW - cardsW - columnGapW
+	// With a single configured device the left device-card column is hidden, so
+	// it must not be reserved in the window width either.
+	leftW := cardsW + columnGapW
+	if monitorPanels <= 1 {
+		leftW = 0
+	}
+	rightW := defaultW - insetW - leftW
 	if kb != nil {
 		if kbW := kb.MaxWidthDp(); kbW > rightW {
 			rightW = kbW
 		}
 	}
-	w = insetW + cardsW + columnGapW + rightW
+	w = insetW + leftW + rightW
 	if w < defaultW {
 		w = defaultW
 	}
@@ -674,6 +732,33 @@ func (a *guiApp) layoutRoot(gtx layout.Context) layout.Dimensions {
 
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				showMonitor := a.monitorPanelCount() > 0
+				// Hide the device-card column when only one device is configured;
+				// there is nothing to switch between and the monitor uses the full
+				// width instead.
+				showCards := len(a.devices) > 1
+
+				monitorCol := layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if showMonitor {
+								return a.layoutVideoMonitor(gtx)
+							}
+							return layout.Dimensions{}
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if !a.keyboardVisible || a.keyboard == nil {
+								return layout.Dimensions{}
+							}
+							return layout.Inset{Top: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return a.keyboard.Layout(a.theme, gtx)
+							})
+						}),
+					)
+				})
+
+				if !showCards {
+					return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceEnd}.Layout(gtx, monitorCol)
+				}
 
 				return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceEnd}.Layout(gtx,
 
@@ -698,24 +783,7 @@ func (a *guiApp) layoutRoot(gtx layout.Context) layout.Dimensions {
 
 					layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
 
-					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								if showMonitor {
-									return a.layoutVideoMonitor(gtx)
-								}
-								return layout.Dimensions{}
-							}),
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								if !a.keyboardVisible || a.keyboard == nil {
-									return layout.Dimensions{}
-								}
-								return layout.Inset{Top: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-									return a.keyboard.Layout(a.theme, gtx)
-								})
-							}),
-						)
-					}),
+					monitorCol,
 				)
 			}),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
@@ -895,6 +963,11 @@ func (a *guiApp) layoutTopToolbar(gtx layout.Context) layout.Dimensions {
 			if dev.active {
 				a.stopAudio(dev)
 			}
+			// Clear active so that when the device powers back on the online
+			// check sees an inactive device and re-triggers autostart. Without
+			// this, active stays true, the autostart gate (!active) fails, and
+			// the test card stays up instead of the resumed video.
+			dev.active = false
 			commands.PowerOff()
 			dev.online = false
 			dev.lastChecked = time.Now()
@@ -1436,6 +1509,14 @@ type guiVideoRenderer struct {
 	scaledFrames [monitorBufs]*image.RGBA
 	backIdx      int
 
+	// HiresMode (interlace) merge state: the C64 sends the two interlaced
+	// fields as consecutive frames. prevField holds the first field of a pair;
+	// when the second arrives the two are averaged per-pixel into
+	// mergedFrames[backIdx] for display.
+	prevField    *image.RGBA
+	havePrev     bool
+	mergedFrames [monitorBufs]*image.RGBA
+
 	// CRT bloom scratch buffers (native-resolution RGB), lazily allocated.
 	glowSrc []byte // thresholded bright pixels
 	glowTmp []byte // separable-blur intermediate
@@ -1482,21 +1563,31 @@ func (r *guiVideoRenderer) Render(data []byte) bool {
 		frame = r.renderNative(palImg)
 	}
 
-	imgOp := paint.NewImageOp(frame)
-	if !crtOn {
-
-		imgOp.Filter = paint.FilterNearest
+	// In HiresMode the stream is interlaced: hold the first field of each pair
+	// and only emit once it has been merged (per-pixel averaged) with the
+	// second field.
+	outFrame := frame
+	emit := true
+	if r.dev.device.HiresMode {
+		outFrame, emit = r.mergeHires(frame)
 	}
 
-	r.app.monStats.arrived.Add(1)
-	r.app.mu.Lock()
-	q := append(r.dev.frameQueue, monitorFrame{op: imgOp, img: frame})
-	if len(q) > 3 {
-		q = q[len(q)-3:]
+	if emit {
+		imgOp := paint.NewImageOp(outFrame)
+		if !crtOn {
+			imgOp.Filter = paint.FilterNearest
+		}
+
+		r.app.monStats.arrived.Add(1)
+		r.app.mu.Lock()
+		q := append(r.dev.frameQueue, monitorFrame{op: imgOp, img: outFrame})
+		if len(q) > 3 {
+			q = q[len(q)-3:]
+		}
+		r.dev.frameQueue = q
+		r.app.mu.Unlock()
+		r.app.window.Invalidate()
 	}
-	r.dev.frameQueue = q
-	r.app.mu.Unlock()
-	r.app.window.Invalidate()
 
 	if r.dev.rawFrameCh != nil {
 		rawCopy := make([]byte, len(data))
@@ -1673,6 +1764,43 @@ func boxBlurRGB(src, tmp, dst []byte, w, h, radius int) {
 			dst[o+1] = byte(sg / div)
 			dst[o+2] = byte(sb / div)
 		}
+	}
+}
+
+// mergeHires implements the interlace merge for HiresMode. The first field of
+// each pair is stored and nothing is emitted (emit=false); when the second
+// field arrives the two are averaged per pixel into a fresh ring buffer that is
+// returned for display (emit=true). A change in frame bounds (e.g. CRT being
+// toggled) resets the pairing so mismatched buffers are never blended.
+func (r *guiVideoRenderer) mergeHires(cur *image.RGBA) (*image.RGBA, bool) {
+	b := cur.Bounds()
+	if r.prevField == nil || r.prevField.Bounds() != b {
+		r.prevField = image.NewRGBA(b)
+		copy(r.prevField.Pix, cur.Pix)
+		r.havePrev = true
+		return cur, false
+	}
+	if !r.havePrev {
+		copy(r.prevField.Pix, cur.Pix)
+		r.havePrev = true
+		return cur, false
+	}
+	out := r.mergedFrames[r.backIdx]
+	if out == nil || out.Bounds() != b {
+		out = image.NewRGBA(b)
+		r.mergedFrames[r.backIdx] = out
+	}
+	averageRGBA(r.prevField, cur, out)
+	r.havePrev = false
+	return out, true
+}
+
+// averageRGBA writes the per-channel average of a and b into dst. All three
+// must share identical bounds (and therefore stride and pixel length).
+func averageRGBA(a, b, dst *image.RGBA) {
+	ap, bp, dp := a.Pix, b.Pix, dst.Pix
+	for i := range dp {
+		dp[i] = byte((int(ap[i]) + int(bp[i])) >> 1)
 	}
 }
 

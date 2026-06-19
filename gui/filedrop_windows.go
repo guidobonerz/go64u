@@ -3,6 +3,7 @@
 package gui
 
 import (
+	"fmt"
 	"os"
 	"syscall"
 	"time"
@@ -38,7 +39,7 @@ type pointT struct {
 
 var (
 	origWndProc uintptr
-	dropHandler func(clientX, clientY int, data []byte)
+	dropHandler func(clientX, clientY int, name string, data []byte)
 )
 
 func dropWndProc(hwnd, msg, wParam, lParam uintptr) uintptr {
@@ -49,9 +50,10 @@ func dropWndProc(hwnd, msg, wParam, lParam uintptr) uintptr {
 		count, _, _ := procDragQueryFileW.Call(hDrop, 0xFFFFFFFF, 0, 0)
 		if count > 0 {
 			buf := make([]uint16, 1024)
-			procDragQueryFileW.Call(hDrop, 0, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
-			path := syscall.UTF16ToString(buf)
+			n, _, _ := procDragQueryFileW.Call(hDrop, 0, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
+			path := syscall.UTF16ToString(buf[:n])
 			x, y := int(pt.X), int(pt.Y)
+			fmt.Printf("drop: hDrop=0x%x count=%d chars=%d path=%q at (%d,%d)\n", hDrop, count, n, path, x, y)
 
 			go func(p string, cx, cy int) {
 				data, err := os.ReadFile(p)
@@ -59,7 +61,7 @@ func dropWndProc(hwnd, msg, wParam, lParam uintptr) uintptr {
 					return
 				}
 				if dropHandler != nil {
-					dropHandler(cx, cy, data)
+					dropHandler(cx, cy, p, data)
 				}
 			}(path, x, y)
 		}
@@ -70,7 +72,7 @@ func dropWndProc(hwnd, msg, wParam, lParam uintptr) uintptr {
 	return ret
 }
 
-func enableFileDrop(windowTitle string, onDrop func(clientX, clientY int, data []byte)) {
+func enableFileDrop(windowTitle string, onDrop func(clientX, clientY int, name string, data []byte)) {
 	dropHandler = onDrop
 	go func() {
 		titlePtr, err := syscall.UTF16PtrFromString(windowTitle)
@@ -92,5 +94,6 @@ func enableFileDrop(windowTitle string, onDrop func(clientX, clientY int, data [
 		cb := syscall.NewCallback(dropWndProc)
 		orig, _, _ := procSetWindowLongPtrW.Call(hwnd, gwlpWndProc(), cb)
 		origWndProc = orig
+		fmt.Printf("drop: subclassed hwnd=0x%x origWndProc=0x%x\n", hwnd, orig)
 	}()
 }
