@@ -39,6 +39,7 @@ type Config struct {
 type Device struct {
 	Description        string          `yaml:"Description"`
 	IsDefault          bool            `yaml:"IsDefault"`
+	HiresMode          bool            `yaml:"HiresMode"`
 	CrtMode            bool            `yaml:"CrtMode"`
 	IfOnlineAutostart  bool            `yaml:"IfOnlineAutostart"`
 	IpAddress          string          `yaml:"IpAddress"`
