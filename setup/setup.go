@@ -17,6 +17,7 @@ func Setup(cmd *cobra.Command, skipTerminal bool) {
 	cmd.AddGroup(&cobra.Group{ID: "stream", Title: util.YellowText("Stream Commands")})
 	cmd.AddGroup(&cobra.Group{ID: "vic", Title: util.YellowText("VIC Commands")})
 	cmd.AddGroup(&cobra.Group{ID: "drives", Title: util.YellowText("Drive Commands")})
+	cmd.AddGroup(&cobra.Group{ID: "configs", Title: util.YellowText("Configuration Commands")})
 
 	cmd.AddCommand(commands.ShowDevicesCommand())
 	cmd.AddCommand(commands.DrivesCommand())
@@ -44,5 +45,6 @@ func Setup(cmd *cobra.Command, skipTerminal bool) {
 	cmd.AddCommand(commands.ScreenControlCommand())
 	cmd.AddCommand(commands.RemoteLsCommand())
 	cmd.AddCommand(database.DownloadCommand())
+	cmd.AddCommand(commands.SIDSocketsConfigurationCommand())
 
 }
