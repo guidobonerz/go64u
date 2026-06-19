@@ -225,40 +225,45 @@ type rawFrameMsg struct {
 }
 
 type deviceUI struct {
-	name         string
-	description  string
-	device       *config.Device
-	toggle       widget.Clickable
-	active       bool
-	waveform     []byte
-	frameQueue   []monitorFrame
-	shownFrame   monitorFrame
-	nextFrameDue time.Time
-	videoActive  bool
-	audioPlaying bool
-	audioStopCh  chan struct{}
-	audioMonitor bool
-	videoMonitor bool
-	recording    bool
-	casting      bool
-	overlayOn    bool
-	crtOn        bool
-	recRenderer  *streams.StreamRenderer
-	castRenderer *streams.StreamRenderer
-	rawFrameCh   chan rawFrameMsg
-	audioBtn     widget.Clickable
-	videoBtn     widget.Clickable
-	recBtn       widget.Clickable
-	castBtn      widget.Clickable
-	overlayBtn   widget.Clickable
-	snapBtn      widget.Clickable
-	crtBtn       widget.Clickable
-	resetBtn     widget.Clickable
-	poweroffBtn  widget.Clickable
-	cardClick    widget.Clickable
-	monitorClick widget.Clickable
-	pauseBtn     widget.Clickable
-	paused       bool
+	name          string
+	description   string
+	device        *config.Device
+	toggle        widget.Clickable
+	active        bool
+	waveform      []byte
+	sidSockets    int       // number of enabled SID sockets (2 => stereo, else mono)
+	specPeaksL    []float32 // falling peak-hold per bar, left channel (UI thread only)
+	specPeaksR    []float32 // falling peak-hold per bar, right channel (UI thread only)
+	frameQueue    []monitorFrame
+	shownFrame    monitorFrame
+	nextFrameDue  time.Time
+	videoActive   bool
+	audioPlaying  bool
+	audioStopCh   chan struct{}
+	audioMonitor  bool
+	videoMonitor  bool
+	recording     bool
+	casting       bool
+	overlayOn     bool
+	crtOn         bool
+	recRenderer   *streams.StreamRenderer
+	castRenderer  *streams.StreamRenderer
+	rawFrameCh    chan rawFrameMsg
+	audioBtn      widget.Clickable
+	videoBtn      widget.Clickable
+	recBtn        widget.Clickable
+	castBtn       widget.Clickable
+	overlayBtn    widget.Clickable
+	snapBtn       widget.Clickable
+	crtBtn        widget.Clickable
+	resetBtn      widget.Clickable
+	poweroffBtn   widget.Clickable
+	cardClick     widget.Clickable
+	monitorClick  widget.Clickable
+	analyzerClick widget.Clickable
+	spectrumMode  bool // runtime wave/spectrum toggle (seeded from SoundAnalyzer)
+	pauseBtn      widget.Clickable
+	paused        bool
 
 	testCardOp    paint.ImageOp // per-device test pattern with its name box (lazily built)
 	testCardReady bool
@@ -268,19 +273,21 @@ type deviceUI struct {
 }
 
 var (
-	colorBackground = color.NRGBA{R: 30, G: 30, B: 30, A: 255}
-	colorText       = color.NRGBA{R: 220, G: 220, B: 220, A: 255}
-	colorActive     = color.NRGBA{R: 103, G: 255, B: 69, A: 255}
-	colorInactive   = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
-	colorToggleOff  = color.NRGBA{R: 120, G: 120, B: 120, A: 255}
-	colorStrike     = color.NRGBA{R: 254, G: 0, B: 0, A: 255}
-	colorHoverWhite = color.NRGBA{R: 150, G: 255, B: 130, A: 255}
-	colorHoverGray  = color.NRGBA{R: 0, G: 160, B: 0, A: 255}
-	colorWaveformBg = color.NRGBA{R: 0, G: 0, B: 0, A: 255}
-	colorWaveformFg = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
-	colorSeparator  = color.NRGBA{R: 80, G: 80, B: 80, A: 255}
-	colorCardBg     = color.NRGBA{R: 45, G: 45, B: 45, A: 255}
-	colorButtonBg   = color.NRGBA{R: 70, G: 70, B: 70, A: 255}
+	colorBackground   = color.NRGBA{R: 30, G: 30, B: 30, A: 255}
+	colorText         = color.NRGBA{R: 220, G: 220, B: 220, A: 255}
+	colorActive       = color.NRGBA{R: 103, G: 255, B: 69, A: 255}
+	colorInactive     = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+	colorToggleOff    = color.NRGBA{R: 120, G: 120, B: 120, A: 255}
+	colorStrike       = color.NRGBA{R: 254, G: 0, B: 0, A: 255}
+	colorHoverWhite   = color.NRGBA{R: 150, G: 255, B: 130, A: 255}
+	colorHoverGray    = color.NRGBA{R: 0, G: 160, B: 0, A: 255}
+	colorWaveformBg   = color.NRGBA{R: 0, G: 0, B: 0, A: 255}
+	colorWaveformFg   = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+	colorSpectrumBar  = color.NRGBA{R: 0, G: 210, B: 0, A: 255}
+	colorSpectrumPeak = color.NRGBA{R: 255, G: 220, B: 0, A: 255}
+	colorSeparator    = color.NRGBA{R: 80, G: 80, B: 80, A: 255}
+	colorCardBg       = color.NRGBA{R: 45, G: 45, B: 45, A: 255}
+	colorButtonBg     = color.NRGBA{R: 70, G: 70, B: 70, A: 255}
 
 	iconPlay, _          = widget.NewIcon(icons.AVPlayArrow)
 	iconStop, _          = widget.NewIcon(icons.AVStop)
@@ -422,6 +429,7 @@ func newApp() *guiApp {
 		devices[i].videoMonitor = true
 		devices[i].overlayOn = hasOverlay
 		devices[i].crtOn = devices[i].device.CrtMode
+		devices[i].spectrumMode = devices[i].device.SoundAnalyzer == "spectrum"
 	}
 
 	kb, err := NewVirtualKeyboard(nil)
@@ -533,6 +541,11 @@ func (a *guiApp) checkAllDevices() {
 				}
 				mu.Unlock()
 			}
+			// Refresh the SID socket configuration whenever a device comes
+			// online; it determines whether the analyzer shows one or two panes.
+			if online && !wasOnline {
+				go a.refreshSidConfig(dev)
+			}
 		}()
 	}
 	wg.Wait()
@@ -553,6 +566,24 @@ func (a *guiApp) autoStart(dev *deviceUI) {
 	dev.active = true
 	a.startAudio(dev)
 	fmt.Printf("Auto-started streams for %s (online)\n", dev.name)
+}
+
+// refreshSidConfig queries the device's SID Sockets Configuration and records
+// how many sockets are enabled, so the audio analyzer can show two panes for a
+// stereo (dual-SID) setup or one for a single SID. Runs off the UI thread.
+func (a *guiApp) refreshSidConfig(dev *deviceUI) {
+	data := commands.SIDSocketsConfigurationForDevice(dev.device.IpAddress)
+	if data == nil {
+		return
+	}
+	n := commands.EnabledSIDSocketCount(data)
+	a.mu.Lock()
+	changed := dev.sidSockets != n
+	dev.sidSockets = n
+	a.mu.Unlock()
+	if changed && a.window != nil {
+		a.window.Invalidate()
+	}
 }
 
 func (a *guiApp) layoutOnlineIndicator(gtx layout.Context, dev *deviceUI) layout.Dimensions {
@@ -1228,90 +1259,304 @@ func (a *guiApp) layoutIconButton(gtx layout.Context, btn *widget.Clickable, act
 	})
 }
 
+// layoutWaveform is the audio analyzer slot: clicking it toggles between the
+// waveform and the spectrum view for that device.
 func (a *guiApp) layoutWaveform(gtx layout.Context, dev *deviceUI) layout.Dimensions {
+	if dev.analyzerClick.Clicked(gtx) {
+		dev.spectrumMode = !dev.spectrumMode
+		a.window.Invalidate()
+	}
+	return dev.analyzerClick.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		if dev.spectrumMode {
+			return a.layoutSpectrum(gtx, dev)
+		}
+		return a.drawWaveformPanes(gtx, dev)
+	})
+}
+
+func (a *guiApp) drawWaveformPanes(gtx layout.Context, dev *deviceUI) layout.Dimensions {
 	w := gtx.Constraints.Max.X
 	h := gtx.Dp(unit.Dp(40))
 	gap := gtx.Dp(unit.Dp(6))
 	sz := image.Pt(w, h)
 	gtx.Constraints = layout.Exact(sz)
 
-	halfH := float32(h) / 2
-	channelW := (w - gap) / 2
-
 	defer clip.Rect{Max: sz}.Push(gtx.Ops).Pop()
-
-	func() {
-		defer clip.Rect{Max: image.Pt(channelW, h)}.Push(gtx.Ops).Pop()
-		paint.Fill(gtx.Ops, colorWaveformBg)
-	}()
-	func() {
-		defer clip.Rect{Min: image.Pt(channelW+gap, 0), Max: image.Pt(2*channelW+gap, h)}.Push(gtx.Ops).Pop()
-		paint.Fill(gtx.Ops, colorWaveformBg)
-	}()
 
 	a.mu.RLock()
 	data := dev.waveform
+	panes := audioPaneCount(dev.sidSockets)
 	a.mu.RUnlock()
 
-	if len(data) > 8 {
-
-		sampleCount := (len(data) - 6) / 4
-		if sampleCount < 1 {
-			sampleCount = 1
-		}
-		xStep := float32(channelW) / float32(sampleCount)
-
-		var pathLeft clip.Path
-		pathLeft.Begin(gtx.Ops)
-		first := true
-		var x float32
-		for i := 2; i < len(data)-4; i += 4 {
-			v := halfH - (float32(util.GetSingedWord(i, data))/32768.0)*halfH
-			v = float32(math.Max(0, math.Min(float64(h), float64(v))))
-			if first {
-				pathLeft.MoveTo(f32.Pt(x, v))
-				first = false
-			} else {
-				pathLeft.LineTo(f32.Pt(x, v))
-			}
-			x += xStep
-			if x >= float32(channelW) {
-				break
-			}
-		}
-		specLeft := pathLeft.End()
-		func() {
-			defer clip.Stroke{Path: specLeft, Width: 1}.Op().Push(gtx.Ops).Pop()
-			paint.Fill(gtx.Ops, colorWaveformFg)
-		}()
-
-		var pathRight clip.Path
-		pathRight.Begin(gtx.Ops)
-		first = true
-		x = 0
-		offsetX := float32(channelW + gap)
-		for i := 4; i < len(data)-4; i += 4 {
-			v := halfH - (float32(util.GetSingedWord(i, data))/32768.0)*halfH
-			v = float32(math.Max(0, math.Min(float64(h), float64(v))))
-			if first {
-				pathRight.MoveTo(f32.Pt(offsetX+x, v))
-				first = false
-			} else {
-				pathRight.LineTo(f32.Pt(offsetX+x, v))
-			}
-			x += xStep
-			if x >= float32(channelW) {
-				break
-			}
-		}
-		specRight := pathRight.End()
-		func() {
-			defer clip.Stroke{Path: specRight, Width: 1}.Op().Push(gtx.Ops).Pop()
-			paint.Fill(gtx.Ops, colorWaveformFg)
-		}()
+	paneW, xOff := audioPaneGeom(w, gap, panes, gtx.Dp(unit.Dp(150)))
+	for p := range panes {
+		// Left samples start at byte offset 2, right at 4 (16-bit interleaved).
+		drawWaveChannel(gtx, xOff(p), paneW, h, data, 2+p*2)
 	}
 
 	return layout.Dimensions{Size: sz}
+}
+
+// audioPaneCount maps the enabled SID socket count to the number of analyzer
+// panes: two only for a confirmed dual-SID (stereo) device, otherwise one.
+func audioPaneCount(sidSockets int) int {
+	if sidSockets >= 2 {
+		return 2
+	}
+	return 1
+}
+
+// audioPaneGeom returns the per-pane width and a function giving each pane's x
+// offset. One pane spans the full width; two split it with a gap between. Each
+// pane is clamped to maxPaneW so the analyzer never stretches indefinitely on
+// wide monitors.
+func audioPaneGeom(w, gap, panes, maxPaneW int) (paneW int, xOff func(p int) int) {
+	if panes <= 1 {
+		pw := w
+		if pw > maxPaneW {
+			pw = maxPaneW
+		}
+		return pw, func(int) int { return 0 }
+	}
+	pw := (w - gap) / 2
+	if pw > maxPaneW {
+		pw = maxPaneW
+	}
+	return pw, func(p int) int {
+		if p == 0 {
+			return 0
+		}
+		return pw + gap
+	}
+}
+
+// drawWaveChannel fills one analyzer pane's background and strokes the waveform
+// for the channel whose samples start at startOffset (stride 4 bytes).
+func drawWaveChannel(gtx layout.Context, x0, paneW, h int, data []byte, startOffset int) {
+	func() {
+		defer clip.Rect{Min: image.Pt(x0, 0), Max: image.Pt(x0+paneW, h)}.Push(gtx.Ops).Pop()
+		paint.Fill(gtx.Ops, colorWaveformBg)
+	}()
+	if len(data) <= 8 {
+		return
+	}
+	halfH := float32(h) / 2
+	sampleCount := (len(data) - 6) / 4
+	if sampleCount < 1 {
+		sampleCount = 1
+	}
+	xStep := float32(paneW) / float32(sampleCount)
+
+	var path clip.Path
+	path.Begin(gtx.Ops)
+	first := true
+	var x float32
+	for i := startOffset; i < len(data)-4; i += 4 {
+		v := halfH - (float32(util.GetSingedWord(i, data))/32768.0)*halfH
+		v = float32(math.Max(0, math.Min(float64(h), float64(v))))
+		pt := f32.Pt(float32(x0)+x, v)
+		if first {
+			path.MoveTo(pt)
+			first = false
+		} else {
+			path.LineTo(pt)
+		}
+		x += xStep
+		if x >= float32(paneW) {
+			break
+		}
+	}
+	spec := path.End()
+	func() {
+		defer clip.Stroke{Path: spec, Width: 1}.Op().Push(gtx.Ops).Pop()
+		paint.Fill(gtx.Ops, colorWaveformFg)
+	}()
+}
+
+// Spectrum analyzer tuning.
+const (
+	specFFTSize   = 128   // power-of-two FFT window (samples per channel)
+	specBars      = 24    // number of vertical bars per channel pane
+	specPeakDecay = 0.03  // fraction of full height the yellow peak falls per frame
+	specGain      = 1.4   // post-normalisation gain before clamping to [0,1]
+	specDbFloor   = -42.0 // dB mapped to the bottom of the bar; quieter => 0
+)
+
+// layoutSpectrum renders an audio spectrum analyzer in place of the waveform
+// when a device's SoundAnalyzer is "spectrum": green bars per frequency band
+// with falling yellow peak-hold markers, one pane per stereo channel.
+func (a *guiApp) layoutSpectrum(gtx layout.Context, dev *deviceUI) layout.Dimensions {
+	w := gtx.Constraints.Max.X
+	h := gtx.Dp(unit.Dp(40))
+	gap := gtx.Dp(unit.Dp(6))
+	sz := image.Pt(w, h)
+	gtx.Constraints = layout.Exact(sz)
+
+	defer clip.Rect{Max: sz}.Push(gtx.Ops).Pop()
+
+	a.mu.RLock()
+	data := dev.waveform
+	panes := audioPaneCount(dev.sidSockets)
+	a.mu.RUnlock()
+
+	if len(dev.specPeaksL) != specBars {
+		dev.specPeaksL = make([]float32, specBars)
+	}
+	if len(dev.specPeaksR) != specBars {
+		dev.specPeaksR = make([]float32, specBars)
+	}
+
+	paneW, xOff := audioPaneGeom(w, gap, panes, gtx.Dp(unit.Dp(150)))
+	peaks := [2][]float32{dev.specPeaksL, dev.specPeaksR}
+	for p := range panes {
+		// Left samples start at byte offset 2, right at 4 (interleaved 16-bit).
+		levels := computeSpectrum(data, 2+p*2)
+		a.drawSpectrumPane(gtx, xOff(p), paneW, h, levels, peaks[p])
+	}
+
+	return layout.Dimensions{Size: sz}
+}
+
+func (a *guiApp) drawSpectrumPane(gtx layout.Context, x0, paneW, h int, levels, peaks []float32) {
+	func() {
+		defer clip.Rect{Min: image.Pt(x0, 0), Max: image.Pt(x0+paneW, h)}.Push(gtx.Ops).Pop()
+		paint.Fill(gtx.Ops, colorWaveformBg)
+	}()
+
+	barGap := gtx.Dp(unit.Dp(1))
+	peakH := gtx.Dp(unit.Dp(2))
+	barW := (paneW - barGap*(specBars-1)) / specBars
+	if barW < 1 {
+		barW = 1
+	}
+
+	for i := range specBars {
+		lvl := float32(0)
+		if i < len(levels) {
+			lvl = levels[i]
+		}
+		// Falling peak-hold: jump up to a new max, otherwise decay.
+		if lvl > peaks[i] {
+			peaks[i] = lvl
+		} else if peaks[i] -= specPeakDecay; peaks[i] < 0 {
+			peaks[i] = 0
+		}
+
+		bx := x0 + i*(barW+barGap)
+		barPix := int(lvl * float32(h))
+		if barPix > h {
+			barPix = h
+		}
+		if barPix > 0 {
+			func() {
+				defer clip.Rect{Min: image.Pt(bx, h-barPix), Max: image.Pt(bx+barW, h)}.Push(gtx.Ops).Pop()
+				paint.Fill(gtx.Ops, colorSpectrumBar)
+			}()
+		}
+		if peaks[i] > 0.01 {
+			py := h - int(peaks[i]*float32(h))
+			if py < 0 {
+				py = 0
+			} else if py > h-peakH {
+				py = h - peakH
+			}
+			func() {
+				defer clip.Rect{Min: image.Pt(bx, py), Max: image.Pt(bx+barW, py+peakH)}.Push(gtx.Ops).Pop()
+				paint.Fill(gtx.Ops, colorSpectrumPeak)
+			}()
+		}
+	}
+}
+
+// computeSpectrum extracts one channel from the raw audio buffer (16-bit
+// samples interleaved at a 4-byte stride from startOffset), windows it, runs an
+// FFT and groups the magnitudes into specBars normalised [0,1] bar levels.
+func computeSpectrum(data []byte, startOffset int) []float32 {
+	if len(data) < startOffset+4 {
+		return nil
+	}
+	re := make([]float64, specFFTSize)
+	im := make([]float64, specFFTSize)
+
+	n := 0
+	for i := startOffset; i+1 < len(data) && n < specFFTSize; i += 4 {
+		re[n] = float64(util.GetSingedWord(i, data)) / 32768.0
+		n++
+	}
+	if n < 8 {
+		return nil
+	}
+	// Hann window over the populated samples; the remainder stays zero-padded.
+	for j := range n {
+		wnd := 0.5 - 0.5*math.Cos(2*math.Pi*float64(j)/float64(n-1))
+		re[j] *= wnd
+	}
+
+	fft(re, im)
+
+	half := specFFTSize / 2
+	out := make([]float32, specBars)
+	// Log-spaced band edges from bin 1 (skip DC) to the Nyquist bin, so the low
+	// frequencies where most SID energy sits get more bars than the highs.
+	minBin, maxBin := 1.0, float64(half-1)
+	ratio := maxBin / minBin
+	edge := func(b int) int {
+		return int(minBin * math.Pow(ratio, float64(b)/float64(specBars)))
+	}
+	for b := range specBars {
+		lo := edge(b)
+		hi := edge(b + 1)
+		if hi <= lo {
+			hi = lo + 1
+		}
+		m := 0.0
+		for k := lo; k < hi && k < half; k++ {
+			if mag := math.Hypot(re[k], im[k]); mag > m {
+				m = mag
+			}
+		}
+		lvl := math.Sqrt(m/float64(specFFTSize/4)) * specGain
+		if lvl > 1 {
+			lvl = 1
+		}
+		out[b] = float32(lvl)
+	}
+	return out
+}
+
+// fft runs an in-place iterative radix-2 Cooley-Tukey FFT. re and im must have
+// the same power-of-two length; im is the (initially zero) imaginary part.
+func fft(re, im []float64) {
+	n := len(re)
+	for i, j := 1, 0; i < n; i++ {
+		bit := n >> 1
+		for ; j&bit != 0; bit >>= 1 {
+			j ^= bit
+		}
+		j ^= bit
+		if i < j {
+			re[i], re[j] = re[j], re[i]
+			im[i], im[j] = im[j], im[i]
+		}
+	}
+	for length := 2; length <= n; length <<= 1 {
+		ang := -2 * math.Pi / float64(length)
+		wRe, wIm := math.Cos(ang), math.Sin(ang)
+		for i := 0; i < n; i += length {
+			curRe, curIm := 1.0, 0.0
+			for k := 0; k < length/2; k++ {
+				a1 := i + k
+				b1 := a1 + length/2
+				tRe := re[b1]*curRe - im[b1]*curIm
+				tIm := re[b1]*curIm + im[b1]*curRe
+				re[b1] = re[a1] - tRe
+				im[b1] = im[a1] - tIm
+				re[a1] += tRe
+				im[a1] += tIm
+				curRe, curIm = curRe*wRe-curIm*wIm, curRe*wIm+curIm*wRe
+			}
+		}
+	}
 }
 
 func (a *guiApp) layoutVideoMonitor(gtx layout.Context) layout.Dimensions {

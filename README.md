@@ -259,6 +259,7 @@ The layout consists of three areas:
 | Cast | Start/Stop streaming to a platform (e.g. Twitch) |
 | Overlay | Enable/Disable the stream overlay |
 | CRT | Enable/Disable the CRT scanline effect |
+| Expand | Expand the selected monitor to full size (toggle) |
 | Reset | Send a reset to the U64 |
 | Power Off | Shut down the U64 |
 
@@ -269,26 +270,35 @@ Each configured device is displayed as a card with rounded corners. The card sho
 - Device name and description
 - Online status indicator (green = online, red = offline, gray = unchecked)
 
-The online check runs automatically every 5 seconds in the background.
+The online check runs automatically every 5 seconds in the background. When a device transitions to online and has `IfOnlineAutostart` set, its streams start automatically.
+
+When only **one device** is configured, the device-card column is hidden and that device's monitor is shown expanded by default.
 
 ### Video Monitor
 
 - Displays active video feeds in a grid layout
 - Supports multiple simultaneous device streams
+- Devices that are offline or have stopped streams show a test card with the device name
 - Native resolution: 384x272 pixels (Ultimate64)
 - Scaling with rounded corners
-- Optional CRT scanline effect (sine wave-based brightness modulation)
+- Optional CRT scanline effect with phosphor bloom (per-device, default from the `CrtMode` flag)
+- Optional Hires (interlace) mode: merges each even/odd field pair by per-pixel color averaging (per-device `HiresMode` flag)
 
-### Audio Waveform
+### Audio Analyzer
 
-- Real-time stereo waveform visualization
-- Two channels with visible gap
-- Updated live during audio playback
+A per-device audio analyzer is shown below each monitor. **Click it to toggle** between the two views:
+
+- **Waveform** (default) – real-time oscilloscope-style trace
+- **Spectrum** – green frequency bars with falling yellow peak-hold markers, log-spaced frequency bands and a logarithmic (dB) amplitude scale
+
+The number of panes follows the device's enabled SID sockets (queried from the device's *SID Sockets Configuration*): two panes (stereo L/R) for a dual-SID board, one pane (mono) otherwise. Each pane is capped at 150 px wide. The initial view is set per device via the `SoundAnalyzer` flag (`wave` or `spectrum`).
 
 ### Drag & Drop (Windows)
 
-On Windows, files can be dragged and dropped onto a device monitor window. The file is automatically routed to the correct device based on the drop position in the grid. 
-Actually, it works for PRG files only. 
+On Windows, files can be dragged and dropped onto a device monitor. The file is routed to the device whose monitor pane it was dropped on (or the selected device if dropped outside any pane):
+
+- **PRG** files are loaded and run.
+- **Disk images** (`d64`/`g64`/`d71`/`g71`/`d81`) are mounted on drive A, the machine is reset, and the first program is auto-loaded (`LOAD"*",8,1` + `RUN`).
 
 ### Recording & Streaming
 
@@ -336,6 +346,9 @@ Devices:
     Description: "Device Nme"
     IsDefault: true
     IfOnlineAutostart: true
+    CrtMode: true            # start with the CRT effect enabled
+    HiresMode: false         # merge interlaced field pairs (per-pixel average)
+    SoundAnalyzer: spectrum  # initial audio analyzer: "wave" (default) or "spectrum"
     IpAddress: <ip of device>
     VideoPort: 11000
     AudioPort: 11001

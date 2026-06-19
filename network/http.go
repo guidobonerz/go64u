@@ -61,5 +61,7 @@ func SendHttpRequest(httpConfig *HttpConfig) []byte {
 }
 
 func GetUrl(action string) string {
-	return fmt.Sprintf("http://%s/v1/%s", config.GetConfig().Devices[config.GetConfig().SelectedDevice].IpAddress, action)
+	s := fmt.Sprintf("http://%s/v1/%s", config.GetConfig().Devices[config.GetConfig().SelectedDevice].IpAddress, action)
+	fmt.Println(s)
+	return s
 }

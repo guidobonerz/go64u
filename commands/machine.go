@@ -113,7 +113,7 @@ func PauseCommand() *cobra.Command {
 		GroupID: "machine",
 		Args:    cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
-
+			Pause()
 		},
 	}
 }
